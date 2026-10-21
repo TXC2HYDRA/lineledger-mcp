@@ -7,7 +7,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../server/app.js'
-import { loadPlanner } from '../server/container.js'
 import { openDb, type Db } from '../server/db.js'
 import { TraceTap } from '../server/trace.js'
 
@@ -211,21 +210,25 @@ describe('tools', () => {
     expect((await call(client, 'get_shift_summary')).structuredContent!.shift_date).toBe('2026-10-23') // default = latest
   })
 
-  it('plans a container load (or reports the planner missing)', async () => {
+  it('plans a container load with the standalone planner package', async () => {
     const { client } = await connect()
-    const input = {
-      container: { length: 5898, width: 2352, height: 2393, maxPayloadKg: 26000 },
-      item: { length: 600, width: 400, height: 300, weightKg: 12 },
-    }
-    const r = await call(client, 'plan_container_load', input)
-    if (await loadPlanner()) {
-      expect(r.isError).toBeFalsy()
-      expect(r.structuredContent!.count).toBeGreaterThan(0)
-      const bad = await call(client, 'plan_container_load', { ...input, item: { ...input.item, weightKg: -1 } })
-      expect(bad.isError).toBe(true)
-    } else {
-      expect(r.isError).toBe(true)
-      expect(r.content[0]!.text).toContain('not installed')
+    const container = { length: 5898, width: 2352, height: 2393, maxPayloadKg: 26000 }
+    const item = { length: 600, width: 400, height: 300, weightKg: 12 }
+    const r = await call(client, 'plan_container_load', { container, item })
+    expect(r.isError).toBeFalsy()
+    // 600x400 footprint: 9 x 5 or 14 x 5 style grids; assert the invariants instead of a magic number
+    const d = r.structuredContent!
+    expect(d.count).toBe(Math.min(d.geometricCount, d.payloadCount))
+    expect(d.grid.along * d.grid.across * d.grid.layers).toBe(d.geometricCount)
+    expect(d.count).toBeGreaterThan(100)
+    expect(d.totalWeightKg).toBe(d.count * 12)
+    // payload-limited case
+    const heavy = await call(client, 'plan_container_load', { container, item: { ...item, weightKg: 500 } })
+    expect(heavy.structuredContent).toMatchObject({ limitedBy: 'payload', count: 52 })
+    // invalid input is rejected by the zod schema and reported as isError
+    for (const bad of [{ ...item, weightKg: -1 }, { ...item, length: 0 }]) {
+      const r2 = await call(client, 'plan_container_load', { container, item: bad })
+      expect(r2.isError).toBe(true)
     }
   })
 })
