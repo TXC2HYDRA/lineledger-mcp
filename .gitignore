@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# secrets and credentials (never commit)
+.env
+.env.*
+!.env.example
+.aws/
+*.pem
+*.key
+credentials*
+
+# local data and databases
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# build output, caches, coverage
+dist/
+build/
+.cache/
+.vite/
+.vitest/
+coverage/
+*.tsbuildinfo
+
+# local recordings and temporary exports
+recordings/
+*.mp4
+*.mov
+*.webm
+*.mkv
+tmp/
+*.log
+
+# private planning material (not part of the public repo)
+docs/*.pdf
+.claude/

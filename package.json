@@ -1,0 +1,28 @@
+{
+  "name": "lineledger-mcp",
+  "version": "0.0.0",
+  "description": "LineLedger — Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "preflight:mcp": "tsx scripts/mcp-preflight.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "express": "5.3.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
