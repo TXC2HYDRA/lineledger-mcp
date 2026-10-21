@@ -1,6 +1,5 @@
-// Phase 0 preflight: prove the pinned MCP SDK speaks Streamable HTTP over a real socket.
-// Not run yet: dependencies are not installed until the download manifest is approved.
-// APIs follow @modelcontextprotocol/sdk 1.32.1 (v1.x). VERIFY the first run against the installed package.
+// Preflight: prove the pinned MCP SDK speaks Streamable HTTP over a real socket.
+// APIs follow @modelcontextprotocol/sdk 1.32.1 (v1.x). First run: PASS on 2026-10-21 (see docs/friction-log.md).
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Request, Response } from 'express'
@@ -87,8 +86,18 @@ try {
   console.log(`raw initialize -> protocolVersion ${wireVersion}`)
   if (wireVersion !== PROTOCOL) throw new Error(`expected ${PROTOCOL}, got ${wireVersion}`)
 
+  const getStatus = (method: string) => fetch(url, { method }).then((r) => r.status)
+  for (const method of ['GET', 'DELETE']) {
+    const status = await getStatus(method)
+    console.log(`${method} /mcp -> ${status}`)
+    if (status !== 405) throw new Error(`expected 405 on ${method}, got ${status}`)
+  }
+
   const client = new Client({ name: 'lineledger-preflight-client', version: '0.0.0' })
-  await client.connect(new StreamableHTTPClientTransport(new URL(url)))
+  const transport = new StreamableHTTPClientTransport(new URL(url))
+  await client.connect(transport)
+  console.log(`SDK client negotiated protocolVersion ${transport.protocolVersion}`)
+  if (transport.protocolVersion !== PROTOCOL) throw new Error(`client negotiated ${transport.protocolVersion}, expected ${PROTOCOL}`)
   const { tools } = await client.listTools()
   console.log(`tools/list -> ${tools.map((t) => t.name).join(', ')}`)
   if (!tools.some((t) => t.name === 'ping')) throw new Error('ping tool missing from tools/list')

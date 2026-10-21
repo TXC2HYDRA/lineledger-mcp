@@ -4,7 +4,7 @@ A voice-first assistant for a plant manager or line operator, backed by a self-h
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over Streamable HTTP.
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
-> **Status: Phase 0 scaffold.** There is no runnable application yet. This README only lists
+> **Status: Phase 1 (install and preflight) done.** There is no application yet. This README only lists
 > commands that have been run. Setup and run instructions will be added as each phase is verified.
 
 ## Demo data disclosure
@@ -36,6 +36,13 @@ See `docs/implementation-decisions.md` for the verified versions and the reasoni
 node -v      # v22.23.3
 node -e "const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(':memory:'); d.exec('create table t(a)'); d.prepare('insert into t values (?)').run(1); console.log(d.prepare('select a from t').all().length); d.close()"
 # prints 1 (Node 22 prints an ExperimentalWarning for node:sqlite)
+```
+
+```bash
+npm install            # 145 packages, 0 vulnerabilities (npm audit)
+npm run typecheck      # clean
+npm run preflight:mcp  # PASS: raw initialize and SDK client both negotiate protocolVersion 2025-11-25;
+                       # tools/list, tools/call ping work; GET and DELETE /mcp return 405
 ```
 
 ## License
