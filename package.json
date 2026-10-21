@@ -1,7 +1,7 @@
 {
   "name": "lineledger-mcp",
   "version": "0.0.0",
-  "description": "LineLedger \u2014 Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
+  "description": "LineLedger — Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "container-load-planner": "git+https://github.com/TXC2HYDRA/container-load-planner.git#3c4fe91",
     "express": "5.3.0",
     "zod": "4.6.7"
   },
