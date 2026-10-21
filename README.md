@@ -4,60 +4,129 @@ A voice-first assistant for a plant manager or line operator, backed by a self-h
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over Streamable HTTP.
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
-> **Status: work in progress.** Server and web client run. Agent mode and docs are pending.
-> This README only lists commands that have been run.
+The web app simulates the voice-assistant experience in a browser. It is not connected to a
+physical Alexa+ device.
 
 ## Demo data disclosure
 
-All production, handover and purchasing records in this project are **synthetic demo data**.
-Nothing is connected to a real factory, real inventory or real customers. The project does not
-monitor live equipment and does not integrate with a physical Alexa+ device.
+All production, handover, follow-up and stock records are **synthetic demo data**. Nothing is
+connected to a real factory, real inventory or real customers. The project does not monitor live
+equipment. The UI shows "SYNTHETIC DEMO DATA" at all times.
+
+Speech input uses the browser's Web Speech API. In Chrome, speech recognition sends audio to the
+browser vendor's speech service. This project does not run that service. Text input always works,
+and the microphone starts only after you click Listen.
 
 ## Zero-cost, local-first
 
-The project is built and demoed without any paid service. It makes no calls to cloud APIs and
-needs no cloud credentials. The language model, when used, runs locally.
+No paid service, no cloud API calls, no credentials in this repository. The optional language-model
+agent runs against a local Ollama server on loopback only.
 
-## Planned architecture
+## What it does
 
-- `server/`: TypeScript MCP server (`@modelcontextprotocol/sdk` 1.32.1, Express, zod, `node:sqlite`).
-- `packages/container-load/`: standalone, MIT-licensed container-load calculation library.
-- `web/`: Vite + vanilla TypeScript client with a live MCP trace panel and shift dashboard.
-- `agent/`: small Python service (Strands Agents SDK with a local Ollama model), with a deterministic
-  rule-based planner as fallback.
-- `docs/`: UI specification, implementation decisions, product feedback and friction log.
+A plant manager can ask, by typing or speaking:
 
-See `docs/implementation-decisions.md` for the verified versions and the reasoning, and
-`docs/ui-spec.md` for the design system.
+- "shift summary": output versus target per line, with on-track, at-risk and behind status.
+- "add handover note for line 2: sealer jaw ran hot": saved in SQLite, kept across restarts.
+- "add follow-up: re-check guard, owner Ravi, due 2026-10-22, line 1", "open follow-ups", "close follow-up 3".
+- "stock of hdpe": stock level, reorder status and suggested purchase quantity.
+- "how many 600x400x300 12kg boxes fit in a 20ft container": calls the standalone
+  [container-load-planner](https://github.com/TXC2HYDRA/container-load-planner) package
+  (MIT, pinned to commit `3c4fe91`).
+
+The web page shows the chat, a live MCP trace of the real JSON-RPC traffic, and a dashboard.
 
 ## Run it
 
-Requirements: Node 22.12 or newer. No cloud account, no API key.
+Requirements: Node 22.12 or newer. No cloud account and no API key.
 
 ```bash
 npm install
 npm run dev:server        # MCP server on http://127.0.0.1:8787/mcp (SQLite in data/, git-ignored)
-npm run dev:web           # web client on http://127.0.0.1:5173 (proxies /mcp and /api to the server)
+npm run dev:web           # web client on http://127.0.0.1:5173 (proxies /mcp, /api and /agent)
 ```
 
-If port 5173 is busy, run both with `WEB_PORT=5273` (the server's Origin allowlist follows it).
-`PORT` changes the server port. Open the web URL, then type or use the example buttons.
-The microphone starts only after you click Listen (browser Web Speech API; text always works).
+Open the web URL, then type a request or click an example button.
 
-## Verified commands
+If port 5173 is busy, run both commands with `WEB_PORT=5273` (the server's Origin allowlist follows
+it). `PORT` changes the server port. To reset the demo data, stop the server and delete `data/`.
+
+### Verify
 
 ```bash
-npm run typecheck      # clean (server, tests, scripts, web)
-npm test               # vitest: MCP client over real HTTP, hardening, planner (see test output below)
-npm run check:contrast # recomputes WCAG contrast from web/src/style.css: 25 pairs pass
-npm run build          # vite build -> dist/web
-npm run preflight:mcp  # raw initialize and SDK client both report protocolVersion 2025-11-25
+npm run typecheck        # server, tests, scripts and web
+npm test                 # vitest: MCP client over real HTTP, hardening, rule-based planner
+npm run check:contrast   # recomputes WCAG contrast from web/src/style.css
+npm run build            # vite build -> dist/web
+npm run preflight:mcp    # raw initialize and SDK client both report protocolVersion 2025-11-25
 ```
 
-MCP tools (`server/tools.ts`): `get_shift_summary`, `create_handover_note`, `list_handover_notes`,
-`create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
-`plan_container_load` calls the standalone [container-load-planner](https://github.com/TXC2HYDRA/container-load-planner)
-package (MIT, pinned to commit `3c4fe91`, installed over HTTPS and built by its `prepare` script).
+## MCP evidence
+
+Spec version: the server negotiates **2025-11-25**. `npm run preflight:mcp` checks it twice: from the
+raw `initialize` response on the wire, and from `transport.protocolVersion` in the SDK client.
+`tests/server.test.ts` asserts it again.
+
+Where `@modelcontextprotocol/sdk` 1.32.1 is imported and called at runtime:
+
+| File | What it does |
+|---|---|
+| `server/app.ts` | Creates an `McpServer` and a `StreamableHTTPServerTransport` per POST to `/mcp`, calls `server.connect(transport)` and `transport.handleRequest(...)`. Uses the SDK's `hostHeaderValidation`. |
+| `server/tools.ts` | Eight `server.registerTool(...)` calls with zod input and output schemas, `structuredContent`, `isError` results and tool annotations. |
+| `web/src/mcp.ts` | The browser uses the SDK `Client` with `StreamableHTTPClientTransport` to call the tools. |
+| `scripts/mcp-preflight.ts` | Starts a server on an ephemeral port and runs `initialize`, `tools/list` and `tools/call` through the SDK client. |
+| `tests/server.test.ts` | A real SDK client talks to the server over HTTP. |
+
+Transport behaviour: stateless Streamable HTTP, `GET` and `DELETE` on `/mcp` return 405 with
+`Allow: POST`, the server binds to `127.0.0.1` only, requests are checked for Host and Origin, and
+request bodies are limited to 64 KB. A server-side trace tap records every JSON-RPC message in and
+out and streams it to the UI, so the trace panel shows only real traffic.
+
+Tools: `get_shift_summary`, `create_handover_note`, `list_handover_notes`, `create_follow_up`,
+`list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
+
+## Architecture
+
+```
+browser (web/)  --same-origin proxy-->  MCP server (server/)  -->  SQLite (node:sqlite)
+   chat, trace, dashboard                Express + MCP SDK          container-load-planner
+        |                                    ^
+        +--- optional: /agent proxy ---> agent/ (Strands + local Ollama) --MCP client--+
+```
+
+- `server/`: TypeScript MCP server (Express 5, zod 4, `node:sqlite`).
+- `web/`: Vite + vanilla TypeScript client. The default planner is a deterministic rule-based mapper
+  (`web/src/planner.ts`, no LLM) from request text to tool calls.
+- `agent/`: optional Python service using Strands Agents with an explicit local Ollama model, the
+  MCP server's tools, an AWS-environment scrub and a loopback-only check.
+- `docs/`: UI specification, implementation decisions, download manifest, friction log, product
+  feedback and the demo video plan.
+
+## Optional: local-model agent
+
+Status: **the code and its guard tests exist; the model itself has not been run yet.** Tool-call
+reliability and latency with a local model are unverified, so the web client defaults to the
+rule-based planner.
+
+```bash
+python3 -m venv .venv && .venv/bin/python -m pip install -r agent/requirements.txt
+npm run test:agent       # 3 tests: AWS env scrub, explicit OllamaModel, loopback-only, MCP tool discovery
+```
+
+Running the agent needs a local Ollama server (not installed by this repository). See
+`docs/download-approval-manifest.md` for the no-sudo steps. Then:
+
+```bash
+npm run dev:agent        # http://127.0.0.1:8788, model qwen3:4b
+```
+
+and press "Planner: local model" in the web client.
+
+## Limits
+
+- Microphone input and speech output: not tested outside a headless browser run.
+- Speech recognition accuracy in a loud factory is not claimed.
+- Production `vite preview` and a full real-keyboard pass are not tested.
 
 ## License
 
