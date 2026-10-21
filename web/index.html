@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LineLedger</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>LineLedger <span class="sub">Factory-Floor Co-pilot</span></h1>
+    <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
+    <p id="conn" class="conn" data-state="connecting" role="status"><span class="icon" aria-hidden="true">◌</span> <span id="conn-text">MCP connecting</span></p>
+  </header>
+
+  <main class="grid">
+    <section class="card chat" aria-labelledby="chat-h">
+      <h2 id="chat-h">Chat</h2>
+      <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
+      <div class="chips" role="group" aria-label="Example requests">
+        <button type="button" class="chip" data-say="shift summary">Shift summary</button>
+        <button type="button" class="chip" data-say="open follow-ups">Open follow-ups</button>
+        <button type="button" class="chip" data-say="stock of hdpe">Stock of HDPE</button>
+        <button type="button" class="chip" data-say="how many 600x400x300 12kg boxes fit in a 20ft container">Container load</button>
+      </div>
+      <form id="composer" class="composer" autocomplete="off">
+        <label for="text" class="sr-only">Type a request</label>
+        <input id="text" name="text" type="text" placeholder="Type a request..." maxlength="400" />
+        <button type="submit" id="send">Send</button>
+        <button type="button" id="listen" aria-pressed="false">🎙 Listen</button>
+        <button type="button" id="stop-speech" disabled>■ Stop speaking</button>
+      </form>
+    </section>
+
+    <section class="card trace" aria-labelledby="trace-h">
+      <h2 id="trace-h">Live MCP trace</h2>
+      <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
+      <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
+    </section>
+
+    <section class="card dash" aria-labelledby="dash-h">
+      <h2 id="dash-h">Shift dashboard</h2>
+      <div id="shift" class="panel" data-state="loading"><p class="muted">Loading shift output...</p></div>
+      <h3>Handover notes</h3>
+      <div id="notes" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
+      <h3>Open follow-ups</h3>
+      <div id="followups" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
+      <h3>Container load</h3>
+      <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
+    </section>
+  </main>
+
+  <footer class="voice-strip" id="voice-strip" data-state="idle" role="status" aria-live="polite">
+    <span class="icon" id="voice-icon" aria-hidden="true">○</span>
+    <strong id="voice-state">IDLE</strong>
+    <span id="voice-detail" class="muted">Type or press Listen.</span>
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -20,3 +20,20 @@ Real observations from building LineLedger. Each entry: task, steps, expected vs
 ## 3. Pinned stack worked first try
 
 - `npm install` (145 packages, 0 vulnerabilities per `npm audit`), `tsc --noEmit` clean, preflight PASS with SDK 1.32.1, Express 5.3.0, zod 4.6.7 and the `zod/v4` import path. Nothing to report as friction; recorded so the log is not only complaints.
+
+## 4. v1 client in a browser build (answers VERIFY item D3)
+
+- Task: call the MCP server from the Vite web client.
+- Steps: imported `Client` and `StreamableHTTPClientTransport` from `@modelcontextprotocol/sdk` 1.32.1 in `web/src/mcp.ts`, built with Vite 8.3.5 (`npm run build`: 254 modules, 312 kB JS), drove the dev page with headless Chrome over the DevTools protocol.
+- Result: `initialize` negotiated 2025-11-25 and `tools/list` and `tools/call` worked through the same-origin Vite proxy, with no CORS setup. No hand-written fetch client was needed. Not tested: a production `vite preview` run.
+- Friction: the client bundle pulls in zod and the JSON-schema validator, so the web bundle is about 312 kB.
+
+## 5. A stateless server needs its own trace tap
+
+- Task: show real JSON-RPC traffic in the UI.
+- Steps: the SDK exposes no hook for "message in / message out" on the HTTP transport. I wrapped `transport.send` per request and recorded `req.body` before `handleRequest`.
+- Suggestion: a documented `onMessage` / `onSend` observer on `StreamableHTTPServerTransport` for logging and tracing.
+
+## 6. Port 5173 was already taken on this machine
+
+- The Vite default port was held by another project's dev server. `WEB_PORT` and `PORT` env vars now select the ports and the server's Origin allowlist follows `WEB_PORT`.

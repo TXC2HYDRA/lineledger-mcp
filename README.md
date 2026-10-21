@@ -4,8 +4,8 @@ A voice-first assistant for a plant manager or line operator, backed by a self-h
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over Streamable HTTP.
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
-> **Status: Phase 1 (install and preflight) done.** There is no application yet. This README only lists
-> commands that have been run. Setup and run instructions will be added as each phase is verified.
+> **Status: work in progress.** Server and web client run. Agent mode, docs and the planner package are pending.
+> This README only lists commands that have been run.
 
 ## Demo data disclosure
 
@@ -30,20 +30,34 @@ needs no cloud credentials. The language model, when used, runs locally.
 See `docs/implementation-decisions.md` for the verified versions and the reasoning, and
 `docs/ui-spec.md` for the design system.
 
-## Verified so far
+## Run it
+
+Requirements: Node 22.12 or newer. No cloud account, no API key.
 
 ```bash
-node -v      # v22.23.3
-node -e "const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(':memory:'); d.exec('create table t(a)'); d.prepare('insert into t values (?)').run(1); console.log(d.prepare('select a from t').all().length); d.close()"
-# prints 1 (Node 22 prints an ExperimentalWarning for node:sqlite)
+npm install
+npm run dev:server        # MCP server on http://127.0.0.1:8787/mcp (SQLite in data/, git-ignored)
+npm run dev:web           # web client on http://127.0.0.1:5173 (proxies /mcp and /api to the server)
 ```
 
+If port 5173 is busy, run both with `WEB_PORT=5273` (the server's Origin allowlist follows it).
+`PORT` changes the server port. Open the web URL, then type or use the example buttons.
+The microphone starts only after you click Listen (browser Web Speech API; text always works).
+
+## Verified commands
+
 ```bash
-npm install            # 145 packages, 0 vulnerabilities (npm audit)
-npm run typecheck      # clean
-npm run preflight:mcp  # PASS: raw initialize and SDK client both negotiate protocolVersion 2025-11-25;
-                       # tools/list, tools/call ping work; GET and DELETE /mcp return 405
+npm run typecheck      # clean (server, tests, scripts, web)
+npm test               # vitest: MCP client over real HTTP, hardening, planner (see test output below)
+npm run check:contrast # recomputes WCAG contrast from web/src/style.css: 25 pairs pass
+npm run build          # vite build -> dist/web
+npm run preflight:mcp  # raw initialize and SDK client both report protocolVersion 2025-11-25
 ```
+
+MCP tools (`server/tools.ts`): `get_shift_summary`, `create_handover_note`, `list_handover_notes`,
+`create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
+`plan_container_load` needs the standalone `container-load-planner` package, which is not installed yet;
+until it is, the tool returns an `isError` result saying so.
 
 ## License
 

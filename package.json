@@ -10,9 +10,12 @@
   },
   "scripts": {
     "preflight:mcp": "tsx scripts/mcp-preflight.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "dev:server": "tsx server/main.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:web": "vite",
+    "build": "vite build",
+    "check:contrast": "tsx scripts/check-contrast.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
