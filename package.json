@@ -1,7 +1,7 @@
 {
   "name": "lineledger-mcp",
   "version": "0.0.0",
-  "description": "LineLedger — Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
+  "description": "LineLedger \u2014 Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,9 @@
     "test": "vitest run",
     "dev:web": "vite",
     "build": "vite build",
-    "check:contrast": "tsx scripts/check-contrast.ts"
+    "check:contrast": "tsx scripts/check-contrast.ts",
+    "dev:agent": ".venv/bin/python agent/service.py",
+    "test:agent": ".venv/bin/python -m unittest discover -s agent -v"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
