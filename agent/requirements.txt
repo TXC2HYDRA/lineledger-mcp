@@ -1,0 +1,2 @@
+strands-agents[ollama]==1.61.1
+mcp==1.30.0
