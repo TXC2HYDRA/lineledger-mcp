@@ -37,3 +37,14 @@ Real observations from building LineLedger. Each entry: task, steps, expected vs
 ## 6. Port 5173 was already taken on this machine
 
 - The Vite default port was held by another project's dev server. `WEB_PORT` and `PORT` env vars now select the ports and the server's Origin allowlist follows `WEB_PORT`.
+
+## 7. Strands starts the MCP connection when the Agent is constructed
+
+- Task: unit-test the "model must be Ollama" guard without a model server.
+- Steps: `Agent(model=..., tools=[MCPClient(url=...)])` raised `Failed to load tool ... Failed to start MCP client` because the MCP server was not running.
+- Workaround: the guard test starts the real MCP server (in-memory SQLite) first. This also proves the Strands MCP client discovers all eight tools over Streamable HTTP.
+- Suggestion: lazy MCP start until the first call, or a documented offline mode for construction.
+
+## 8. Deprecated import in the older Strands/MCP docs path
+
+- `mcp.client.streamable_http.streamablehttp_client` warns "Use `streamable_http_client` instead" in mcp 1.30.0. Passing `MCPClient(url=...)` to Strands avoids the deprecated call.
