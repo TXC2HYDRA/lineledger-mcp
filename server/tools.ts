@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { planContainerLoad } from 'container-load-planner'
 import * as z from 'zod/v4'
-import { loadPlanner } from './container.js'
 import type { Db } from './db.js'
 
 const ok = (data: Record<string, unknown>): CallToolResult => ({
@@ -301,11 +301,9 @@ export function registerTools(server: McpServer, db: Db): void {
       },
       annotations: READ,
     },
-    async (input) => {
-      const plan = await loadPlanner()
-      if (!plan) return fail('container-load-planner package is not installed on this server.')
+    (input) => {
       try {
-        return ok(plan(input))
+        return ok({ ...planContainerLoad(input) })
       } catch (error) {
         return fail(error instanceof Error ? error.message : 'Container load calculation failed.')
       }

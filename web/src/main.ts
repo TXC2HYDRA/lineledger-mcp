@@ -131,12 +131,38 @@ function showContainer(d: Data) {
 
 const refreshAll = () => Promise.all([refreshShift(), refreshNotes(), refreshFollowUps()])
 
+// ---- planner mode: deterministic rules (default) or the local-model agent service -----------
+let modelMode = false
+async function askAgent(text: string): Promise<{ reply: string; tool_calls: { name: string }[]; seconds: number; model: string }> {
+  const res = await fetch('/agent/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) })
+  const body = (await res.json().catch(() => ({}))) as Data
+  if (!res.ok) throw new Error(body.error ?? `agent service returned HTTP ${res.status}`)
+  return body as never
+}
+
 // ---- sending a request ----------------------------------------------------------------------
 let busy = false
 async function send(text: string, fromVoice: boolean) {
   if (busy || !text.trim()) return
   busy = true
   addMessage('You', text, 'user')
+  if (modelMode) {
+    setVoice('thinking', 'Local model is working. This can take a while on CPU.')
+    try {
+      const r = await askAgent(text)
+      const tools = r.tool_calls.map((c) => c.name).join(', ') || 'none'
+      addMessage('LineLedger', `${r.reply}\n[local model ${r.model} · ${r.seconds} s · tools: ${tools}]`)
+      void refreshAll()
+      finish(r.reply, fromVoice)
+    } catch (e) {
+      const message = `Local model unavailable: ${errorText(e)}. Switch the planner back to rules.`
+      addMessage('LineLedger', message, 'error')
+      setVoice('error', message)
+    } finally {
+      busy = false
+    }
+    return
+  }
   const p = plan(text)
   if (p.kind === 'help') {
     addMessage('LineLedger', p.message)
@@ -231,6 +257,12 @@ listenBtn.addEventListener('click', () => {
   })
 })
 if (!canListen) listenBtn.title = 'Speech recognition is not supported in this browser. Type instead.'
+const modeBtn = $('mode') as HTMLButtonElement
+modeBtn.addEventListener('click', () => {
+  modelMode = !modelMode
+  modeBtn.setAttribute('aria-pressed', String(modelMode))
+  modeBtn.textContent = modelMode ? 'Planner: local model' : 'Planner: rules (no LLM)'
+})
 $('stop-speech').addEventListener('click', () => {
   stopSpeaking()
   setVoice('idle', 'Speech stopped.')

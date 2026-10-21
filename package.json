@@ -15,10 +15,13 @@
     "test": "vitest run",
     "dev:web": "vite",
     "build": "vite build",
-    "check:contrast": "tsx scripts/check-contrast.ts"
+    "check:contrast": "tsx scripts/check-contrast.ts",
+    "dev:agent": ".venv/bin/python agent/service.py",
+    "test:agent": ".venv/bin/python -m unittest discover -s agent -v"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "container-load-planner": "git+https://github.com/TXC2HYDRA/container-load-planner.git#3c4fe91",
     "express": "5.3.0",
     "zod": "4.6.7"
   },

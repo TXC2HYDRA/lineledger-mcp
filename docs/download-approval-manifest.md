@@ -6,6 +6,12 @@ official registries and release metadata (GitHub API, npm, PyPI, ollama.com). An
 
 Machine: Linux x86_64, CPU only, 30 GB RAM (about 9 GiB available at check time), 89 GB free disk.
 
+## Approval record
+
+- 2026-10-21: C (npm packages) approved and installed. Planner dependency `container-load-planner#3c4fe91` (HTTPS git, MIT) approved and installed. B (Python packages, `.venv/`, 49 packages, 112 MB) approved and installed after a `pip install --dry-run` matched this list.
+- A1 and A2 (Ollama tarball and `qwen3:4b`): approved; the user runs the steps below. Not yet downloaded when this was written.
+- Not approved: A3, D1, D2, any hosted API.
+
 ## Recommended approval set (about 4.1 GB download)
 
 | Approve | Artifact | Why |

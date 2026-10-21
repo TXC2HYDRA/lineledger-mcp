@@ -4,7 +4,7 @@ A voice-first assistant for a plant manager or line operator, backed by a self-h
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server over Streamable HTTP.
 Built for the Build, Ship, Shape: Amazon Developer Hackathon (Alexa+ track).
 
-> **Status: work in progress.** Server and web client run. Agent mode, docs and the planner package are pending.
+> **Status: work in progress.** Server and web client run. Agent mode and docs are pending.
 > This README only lists commands that have been run.
 
 ## Demo data disclosure
@@ -56,8 +56,8 @@ npm run preflight:mcp  # raw initialize and SDK client both report protocolVersi
 
 MCP tools (`server/tools.ts`): `get_shift_summary`, `create_handover_note`, `list_handover_notes`,
 `create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
-`plan_container_load` needs the standalone `container-load-planner` package, which is not installed yet;
-until it is, the tool returns an `isError` result saying so.
+`plan_container_load` calls the standalone [container-load-planner](https://github.com/TXC2HYDRA/container-load-planner)
+package (MIT, pinned to commit `3c4fe91`, installed over HTTPS and built by its `prepare` script).
 
 ## License
 
