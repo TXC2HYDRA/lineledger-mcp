@@ -8,7 +8,7 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 - All data is synthetic. The badge must be on screen the whole time.
 - No physical device, no developer console, no live factory data, no real customers.
 - Do not say speech works in a noisy factory. We have not tested that.
-- No AWS service is used. Do not mention one.
+- No AWS service is called. If you mention the AWS Builder challenge, say only that the optional agent uses the Strands Agents SDK with a local model. Do not say or imply an AWS service is used.
 - Name the track once ("Alexa+ track") in the opening line. Technology names such as MCP and SQLite are fine in narration. Do not name any other company or product, and show no third-party logos on screen.
 - No background music. Voice-over and the natural silence between actions only.
 
@@ -83,7 +83,7 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 
 - Add the same two links on Devpost in the project fields. For the Open Source mini challenge form: GitHub username `TXC2HYDRA`, contribution URL `https://github.com/TXC2HYDRA/container-load-planner`, project repository URL `https://github.com/TXC2HYDRA/lineledger-mcp`.
 - Captions: add captions if you can (the narration above is the transcript). Check them for typos.
-- Do not mention the AWS Builder mini challenge in the video or description unless the spike passed and you have followed that part of the write-up. No AWS service is used in this project.
+- AWS Builder mini challenge: mention it only if you have read the official rules and decided to enter (see `docs/devpost-text.md`). Keep the claim exact: the optional agent in `agent/` uses the Strands Agents SDK with a local model, and no AWS service is called. The spike result is mixed (7 of 10 prompts correct), so do not describe the agent as reliable.
 - The author submits on Devpost personally. Deadline: 2026-10-23 12:00 PM PT.
 
 ## Not tested by us (do not state as fact in the video)
