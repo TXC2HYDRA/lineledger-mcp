@@ -76,21 +76,18 @@ Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface
 
 The theme is set before first paint from the saved choice (`localStorage`, wrapped in try/catch), else the system preference. The toggle sits at the right of the top bar (`aria-pressed`, `aria-label`). `npm run check:contrast` checks both themes against their own worst-case surfaces; on light it assumes dense text covers 40% of the area behind the pill and drawer.
 
-## Views
+## Sidebar open and closed
 
-Each sidebar item is a hash route (`#/home`, `#/assistant`, `#/followups`, `#/handover`, `#/container`) and takes the whole content area; there are no duplicate components, CSS shows one card at full size.
+The sidebar toggle (top bar, left) switches between two layouts built from the same DOM. The choice is saved in `localStorage` (try/catch) and applied before first paint.
 
-| Route | Shows |
-|---|---|
-| Home | Hero, line cards, chat, charts, summary cards (the dashboard) |
-| Assistant | Full-height chat plus example request chips |
-| Follow-ups | Add form, Open / Closed / All filter, list with Close buttons |
-| Handover | Add-note form (author, line, text) and the full notes list |
-| Container load | Form (container, box size, weight, rotation) and the layer grid result |
-| MCP trace | Opens the trace drawer (not a route that changes the page) |
+| Sidebar | Layout | What it is |
+|---|---|---|
+| Open (default) | `data-layout="scroll"` | One long page: hero and line cards, output and trend charts, then a full-size Assistant, Follow-ups, Handover and Container load section, then the trace tile. The forms, the Open/Closed/All filter and the chat example chips are shown, and lists are not truncated. |
+| Closed | `data-layout="compact"` | The one-screen dashboard. A small "SYNTHETIC DEMO DATA" chip with a connection dot appears in the top bar so the notice is never hidden. |
 
-The active item follows the route, the breadcrumb and page title follow it, and focus moves to the view heading on navigation. Unknown routes fall back to Home. Sending a request from a form-only view jumps to Assistant, where the answer appears.
+Sidebar links (open layout): Home, Assistant, Follow-ups, Handover and Container load scroll their section to the top with an eased scroll of 0.8 to 1.8 s (instant under `prefers-reduced-motion`). The active link and the breadcrumb follow the scroll position (scroll-spy) and the last link stays current at the end of the page. Each tool section is about one screen tall, so every link can bring its section to the top. MCP trace still opens the drawer. Sending a request from the top bar scrolls to Assistant, where the answer appears.
 
+Transitions are deliberately slow. The sidebar slides and fades over 900 ms while the grid column closes. The content fades out (500 ms), switches layout while hidden, then fades in (500 ms). A second toggle press during the switch is ignored. A closed sidebar is `visibility: hidden` after the slide, so it leaves the tab order. Below 1100 px the sidebar is a top block that collapses by height instead of sliding sideways.
 ## Layout
 
 Left sidebar plus a scrolling content column. Desktop (1500 px and wider) puts the hero and the line cards in one row; below that they stack.
