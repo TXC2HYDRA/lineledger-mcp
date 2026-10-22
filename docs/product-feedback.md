@@ -35,7 +35,7 @@ We did **not** use the Alexa+ developer console or a physical Alexa+ device. No 
 
 [AUTHOR TO CONFIRM] Suggested draft: Yes, for tools that wrap an existing operational data store behind a small, typed interface. MCP made the tool contract (names, schemas, annotations) explicit and testable with a real client, independent of the UI or planner. I would want the Origin, tracing and lazy-connect gaps above closed first.
 
-[ONLY IF SPIKE PASSES] Delete this paragraph otherwise. With Ollama installed and qwen3:4b run through the Strands agent, report what was measured: tool-calling success on the example requests and response latency. Do not claim the AWS Builder mini challenge unless the author has met its requirements.
+Strands with a local Ollama model worked end to end against the MCP server. Measured on a CPU-only laptop: the default `qwen3:4b` is a thinking model whose template ignores `think: False`, so it exhausted a 512-token cap and failed; `qwen3:4b-instruct` answered in about 3 to 17 s but invented arguments on 3 of 10 prompts (a shift date, an author, nested container fields) and fixes to the prompt moved failures around instead of removing them. Flat tool arguments helped a small model more than prompt rules did. See `docs/spike-results.md`.
 
 ## Optional feature requests
 

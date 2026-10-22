@@ -56,6 +56,36 @@ the arguments and the reply:
 Strict tally: 7 correct, 1 partly wrong, 2 failed. Median 10.5 s, mean 12.3 s per turn on CPU only.
 One run of 10 prompts at temperature 0 on one machine: this shows the approach works, not that it is reliable.
 
+## Runs 4 and 5: prompt and tool changes, same 10 prompts
+
+Run 4 added three rules to the system prompt (omit optional arguments, author "Operator" when none is
+given, state only what the tool returned) and put the standard 20ft and 40ft container sizes in the
+container tool's description. Result: the invented author was fixed (prompt 3 now correct), but prompt 2
+still invented a shift date and prompt 9 sent the same invalid container call as before. Only the tool
+name matched in both, so the script still printed 10 of 10.
+
+Run 5 made two more changes: the system prompt now says never to pass `shift_date` or `shift`, and
+`plan_container_load` accepts a flat form (`container_type` "20ft" or "40ft" plus `box_length_mm`,
+`box_width_mm`, `box_height_mm`, `box_weight_kg`) besides the nested objects. Graded by hand:
+
+| # | Prompt | Time | Verdict |
+|---|---|---|---|
+| 1 | shift summary | 36.2 s | Correct |
+| 2 | How is line 2 doing this shift? | 7.8 s | **Wrong.** Still invented `shift_date: 2023-10-15, shift: "A"` despite the explicit rule |
+| 3 | add handover note | 8.1 s | Correct (author "Operator") |
+| 4 | show handover notes | 13.7 s | Correct |
+| 5 | add follow-up | 13.5 s | Correct |
+| 6 | list open follow-ups | 17.1 s | Correct |
+| 7 | close follow-up 1 | 9.6 s | Correct; facts match the stored record (owner Ravi, closed 2026-10-22) |
+| 8 | stock of HDPE | 3.3 s | **Failed.** No tool call; the model said it had no stock data. This prompt called `check_stock` correctly in runs 3 and 4 |
+| 9 | 600x400x300 12kg boxes in a 20ft container | 16.6 s | Tool call correct with the flat form (315 boxes, grid 9 x 5 x 7). The spoken reply is misleading: it says "only 2350 can be loaded by payload limit", but payload would allow 2350, so geometry is the limit |
+| 10 | weather in Pune (no tool) | 3.3 s | Correct: declined, no tool call |
+
+Strict tally for run 5: 7 correct, 1 partly wrong (prompt 9: right numbers, confusing sentence), 2 failed.
+Mean 12.9 s per turn. The overall count did not improve between run 3 and run 5; the failures moved
+(container improved, stock regressed). A prompt tweak that fixes one prompt can break another, and 10
+prompts at temperature 0 is too small a sample to tell fixes from noise.
+
 ## What this means
 
 - Strands + Ollama + the LineLedger MCP server connect and the model can pick the right tool with the
@@ -63,9 +93,8 @@ One run of 10 prompts at temperature 0 on one machine: this shows the approach w
 - `qwen3:4b` (thinking) takes about 1 to 6 minutes per turn on this CPU and fails at the committed token cap.
   `qwen3:4b-instruct` answers in about 3 to 16 s warm, and chose a correct tool for 10 of 10 prompts,
   but 3 of 10 had wrong or invented arguments. That is usable for a demo, not a reliable product.
-- Known fixes not yet applied or re-tested: tell the model in the system prompt to omit shift arguments
-  and to use "Operator" as the author when none is given; give the container tool presets or an example
-  so it fills `length`, `width`, `height` and `maxPayloadKg` correctly.
+- Fixes tried afterwards are described under "Runs 4 and 5" below. They help in places and move failures
+  around, so the model is not reliable enough to be the default.
 - The rule-based planner remains the default and is the demo path. The model is an optional extra.
 - The only code change after the spike is the default model in `agent/service.py`, now `qwen3:4b-instruct`.
   `max_tokens=512` is enough for this model.
