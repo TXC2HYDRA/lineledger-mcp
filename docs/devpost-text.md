@@ -1,6 +1,6 @@
 # Devpost text: LineLedger
 
-Draft for the author to review and paste into Devpost. Items marked [VERIFY], [AUTHOR TO CONFIRM] or [ONLY IF SPIKE PASSES] need a decision or a check before submitting. Delete this line before pasting.
+Draft for the author to review and paste into Devpost. Items marked [VERIFY] or [AUTHOR TO CONFIRM] need a decision or a check before submitting. Delete this line before pasting.
 
 ## Project name
 
@@ -14,7 +14,7 @@ Factory-Floor Co-pilot: ask for the shift summary, leave a handover note or chec
 
 LineLedger is a voice-first assistant prototype for a plant manager or line operator. At a shift change the useful questions are short ones: how did each line do against target, what did the last shift leave behind, which follow-ups are still open, is a material running low, and how many boxes fit in a container. LineLedger answers these in a web app, by text or by voice.
 
-Each request is mapped to one of eight chat tools on a self-hosted Model Context Protocol (MCP) server. The server stores handover notes and follow-ups in SQLite, so they survive a restart. The web app shows the real JSON-RPC messages between the client and the server in a live trace panel, next to a shift dashboard.
+Each request is mapped to one of eight chat tools on a self-hosted Model Context Protocol (MCP) server. A ninth tool, `get_shift_history`, feeds the dashboard trend chart. The server stores handover notes and follow-ups in SQLite, so they survive a restart. The web app shows the real JSON-RPC messages between the client and the server in a live trace panel, next to a shift dashboard.
 
 The server, database and web app run on one machine and use no paid service or cloud account. (The optional browser speech recognition may send audio to the browser vendor; see the data disclosure below.) All production, handover and stock data is synthetic. The voice experience is simulated in a browser; it is not an Alexa+ device skill.
 
@@ -26,8 +26,8 @@ The server, database and web app run on one machine and use no paid service or c
 - Handover notes and follow-ups persist in SQLite (`node:sqlite`).
 - `plan_container_load` calls a separate open-source package, container-load-planner (MIT), which counts how many identical boxes fit in a container on a uniform grid, limited by geometry and payload weight. It is a calculator, not a packing optimiser, and the 20ft and 40ft container sizes in the planner are fixed example values, not carrier specifications.
 - Server hardening: Origin allowlist (requests with no Origin header, such as non-browser clients, are allowed) and Host check, 64 KB request body limit, 405 on GET and DELETE for `/mcp`, bound to 127.0.0.1.
-- A live MCP trace panel fed by a server-side trace tap, so it shows only messages that actually reached the server (the tap keeps the latest 500).
-- A dark Bento Grid web interface with chat, a shift dashboard, handover and follow-up panels, and a voice-state strip (idle, listening, thinking, speaking, error). State is shown with text and an icon, not colour alone. `npm run check:contrast` checks 25 colour pairs against WCAG contrast thresholds.
+- A live MCP trace, shown as a dashboard tile with a message count and a full JSON-RPC drawer. It is fed by a server-side trace tap, so it shows only messages that actually reached the server (the tap keeps the latest 500).
+- A dark Bento Grid web interface with a left sidebar, a plant-output hero metric, per-line cards, chat, output-versus-target bars, a shift trend chart, handover, follow-up and container-load panels, and a voice-state strip (idle, listening, thinking, speaking, error). State is shown with text and an icon, not colour alone. `npm run check:contrast` checks 25 colour pairs against WCAG contrast thresholds.
 - Voice input starts only after the user clicks Listen. Typing always works. Spoken replies can be stopped.
 - A "SYNTHETIC DEMO DATA" badge is always visible.
 - A deterministic rule-based planner (no language model) is the default way requests are turned into tool calls.
@@ -63,11 +63,11 @@ Optional local-model agent: the repository also contains a small Python service 
 - The project does not monitor live equipment.
 - Speech recognition uses the browser's Web Speech API. In Chrome this sends audio to the browser vendor's speech service, which this project does not run. Typing works without it.
 - Speech has not been tested in a real browser with a microphone, and no claim is made that it works reliably in factory noise.
-- Not tested: production `vite preview`, a full real-keyboard pass, and local-model tool-calling and latency.
+- Not tested: production `vite preview` and a full real-keyboard pass. The local-model agent had one 10-prompt spike (7 correct, 1 partly wrong, 2 failed, about 13 s per turn on CPU); it is an experiment, not the tested path. See `docs/spike-results.md`.
 - No AWS service or other paid cloud API is used or called. The project needs no cloud credentials.
 - `node:sqlite` is an experimental Node feature and prints an ExperimentalWarning at startup.
 
-What was tested: `npm test` (19 tests, including a real MCP client over HTTP, hardening checks and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
+What was tested: `npm test` (21 tests, including a real MCP client over HTTP, hardening checks and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
 
 ## Setup
 
@@ -103,7 +103,7 @@ Would we build this again, and why: [AUTHOR TO CONFIRM] Suggested draft: "Yes, f
 - [ ] [VERIFY] https://github.com/TXC2HYDRA/lineledger-mcp is public, and the submission branch (`hydra-build/app`, or main after merging) holds the code you are submitting.
 - [ ] [VERIFY] GitHub shows an MIT license for both repositories (check the license badge in the repository sidebar).
 - [ ] [VERIFY] Form values: GitHub username `TXC2HYDRA`; contribution URL `https://github.com/TXC2HYDRA/container-load-planner`; project repository URL `https://github.com/TXC2HYDRA/lineledger-mcp`.
-- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (19 tests, 3 agent tests).
-- [ ] [VERIFY] The Alexa+ track and the Open Source mini challenge are selected on Devpost; the AWS Builder challenge is selected only if the spike passed and its paragraph is filled with measured results.
+- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (21 tests, 3 agent tests).
+- [ ] [VERIFY] The Alexa+ track and the Open Source mini challenge are selected on Devpost; the AWS Builder challenge is selected only if you have read the official rules and they accept an entry that uses the Strands SDK with a local model and no AWS service. Otherwise delete its paragraph above.
 - [ ] [AUTHOR TO CONFIRM] The "would we build this again" answer is in your own words.
 - [ ] Submit before 2026-10-23 12:00 PM PT.

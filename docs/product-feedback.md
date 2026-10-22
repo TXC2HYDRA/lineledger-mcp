@@ -5,7 +5,7 @@ LineLedger is a simulated voice co-pilot for a plant manager, backed by a self-h
 ## Tools used
 
 - **MCP TypeScript SDK 1.32.1**: server (stateless Streamable HTTP, nine tools with zod input and output schemas) and the browser client.
-- **Strands Agents Python SDK (partly)**: an `agent/` service wired to a local Ollama model, with guards against accidental AWS or Bedrock use. Its guard tests pass (3 tests), including discovery of MCP tools over Streamable HTTP (the test asserts three tool names, not all eight). The local model itself has not been run, so I do not claim the agent works end to end.
+- **Strands Agents Python SDK (partly)**: an `agent/` service wired to a local Ollama model, with guards against accidental AWS or Bedrock use. Its guard tests pass (3 tests), including discovery of MCP tools over Streamable HTTP (the test asserts three tool names, not all nine). A 10-prompt spike against a local model got 7 prompts fully right, so I treat the agent as an experiment and do not claim it is reliable (see `docs/spike-results.md`).
 - **Vite**, **node:sqlite**, **vitest**, **headless Chrome** (to drive the dev page), and the **Web Speech API** (mic starts only after a click; typing always works).
 
 We did **not** use the Alexa+ developer console or a physical Alexa+ device. No AWS service is used or called.
