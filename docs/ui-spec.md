@@ -7,8 +7,8 @@ Voice-first factory-floor co-pilot. Synthetic demo data only.
 - Primary style: **dark dashboard with a left sidebar** (Vaulto-style reference). Sidebar navigation, a top command bar, a hero metric, then independent cards.
 - Secondary style: **Swiss Design**. One sans-serif family, strong alignment, clear hierarchy, consistent numerals.
 - Palette: neutral near-black surfaces, one orange accent (`#FF6A2B`). Red (`--color-danger`) means "behind", never decoration.
-- Surfaces are **glass** (glassmorphism): translucent fills with `backdrop-filter: blur`, a light edge and a soft shadow, over a static page background of two quiet slate-blue hard-edged discs (the discs are what makes the blur visible; no coloured glows). The background carries no text and no state.
-- Glass is only allowed because contrast is checked against the worst case: `npm run check:contrast` composites every glass fill over the page and over each disc before testing text and boundaries. Text that sits directly on the page is checked against each disc too.
+- Surfaces are **glass** (glassmorphism): translucent fills with `backdrop-filter: blur`, a light edge and a soft shadow, over a plain solid page background (no discs, glows or gradients; the blur is subtle by design). The background carries no text and no state.
+- Glass is only allowed because contrast is checked against the worst case: `npm run check:contrast` composites every glass fill over the page before testing text and boundaries.
 - Fallback: with no `backdrop-filter` support, or with `prefers-reduced-transparency: reduce`, the glass tokens switch to the solid surface tokens.
 - Deliberate departures from the reference, kept for accessibility: text is 14 px or larger, every text pair passes WCAG AA, labels on orange use the dark `--color-bg` (white on orange fails 4.5:1).
 - Rejected: Neumorphism (low-contrast boundaries hide focus), Cyberpunk (neon undermines business credibility). Glassmorphism was rejected first and adopted in phase 7 once the contrast check could cover translucent surfaces.
@@ -28,7 +28,7 @@ Source of truth is the `:root` block in `web/src/style.css`. `npm run check:cont
 | `--color-accent` / `--color-focus` | `#FF6A2B` | primary action, focus ring, selected state |
 | `--color-success` / `--color-warning` / `--color-danger` | `#34D399` / `#FBBF24` / `#FF7A7A` | on track / at risk / behind |
 
-Glass tokens (percentages are fill opacity, so the check script can read them): `--blob-a` `#222B42` and `--blob-b` `#1C2230` (page discs), `--glass-pct` 55% (cards, sidebar), `--sheen-pct` 3% (diagonal highlight), `--lift-pct` 5% (controls and rows on glass), `--pill-pct` 85% (voice pill), `--drawer-pct` 90% (trace drawer), `--glass-blur` 18px.
+Glass tokens (percentages are fill opacity, so the check script can read them): `--glass-pct` 55% (cards, sidebar), `--sheen-pct` 3% (diagonal highlight), `--lift-pct` 5% (controls and rows on glass), `--pill-pct` 85% (voice pill), `--drawer-pct` 90% (trace drawer), `--glass-blur` 18px.
 
 Type scale: 14 (minimum) / 18 body / 24 section / 32 metric / 56 hero. Spacing 4-8-12-16-24-32-48. Radius 12 control, 16 card, 20 panel. Motion 120 to 180 ms.
 
@@ -68,11 +68,11 @@ Translucent surfaces, worst case. "Page glow" is text placed directly on the pag
 | warning | 7.83 | 9.84 | 7.85 | 9.21 | 8.67 |
 | danger | 5.17 | 6.51 | 5.19 | 6.09 | 5.73 |
 
-Dark label (`--color-bg`) on accent fill: 6.9 or better. All 210 pairs pass (both themes): text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
+Dark label (`--color-bg`) on accent fill: 6.9 or better. All 146 pairs pass (both themes): text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
 
 ### Light theme
 
-Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light: glass 48%, sheen 22% white, lift 5% black, pill 90%, drawer 94%. A plain white page gives the blur nothing to show, so the light page has two quiet slate-blue discs (`--blob-a` `#D6E0F2`, `--blob-b` `#E3E8F0`). The contrast check tests text on each disc and on glass over each.
+Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light: glass 48%, sheen 22% white, lift 5% black, pill 90%, drawer 94%.
 
 The theme is set before first paint from the saved choice (`localStorage`, wrapped in try/catch), else the system preference. The toggle sits at the right of the top bar (`aria-pressed`, `aria-label`). `npm run check:contrast` checks both themes against their own worst-case surfaces; on light it assumes dense text covers 40% of the area behind the pill and drawer.
 
