@@ -38,9 +38,9 @@ let total = 0
 
 for (const [name, { vars, pct }] of Object.entries(themes)) {
   for (const k of ['glass-pct', 'sheen-pct', 'lift-pct', 'pill-pct', 'drawer-pct']) if (pct[k] === undefined) { console.error(`missing --${k}`); process.exit(1) }
-  for (const k of ['lift-color', 'sheen-color', 'blob-a', 'blob-b']) if (!vars[k]) { console.error(`missing --${k}`); process.exit(1) }
+  for (const k of ['lift-color', 'sheen-color']) if (!vars[k]) { console.error(`missing --${k}`); process.exit(1) }
 
-  // Worst cases: cards sit over a backdrop disc; the pill and drawer can float over the brightest or darkest content
+  // Worst cases: cards sit over the plain page; the pill and drawer can float over the brightest or darkest content
   // (a full accent block or dense text).
   const glass = over(vars['color-surface']!, pct['glass-pct']!, vars['color-bg']!)
   const withSheen = over(vars['sheen-color']!, pct['sheen-pct']!, glass)
@@ -58,13 +58,6 @@ for (const [name, { vars, pct }] of Object.entries(themes)) {
     const drawer = over(vars['color-surface']!, pct['drawer-pct']!, under)
     surfaces[`pill (over ${label})`] = pill
     surfaces[`drawer + lift (over ${label})`] = over(vars['lift-color']!, pct['lift-pct']!, drawer)
-  }
-
-  // backdrop discs: text must also hold on the blob itself and under glass over it
-  for (const k of ['blob-a', 'blob-b']) {
-    const g = over(vars['color-surface']!, pct['glass-pct']!, vars[k]!)
-    surfaces[`${k}`] = vars[k]!
-    surfaces[`glass + sheen + lift (over ${k})`] = over(vars['lift-color']!, pct['lift-pct']!, over(vars['sheen-color']!, pct['sheen-pct']!, g))
   }
 
   const text = ['color-text', 'color-text-muted', 'color-accent', 'color-success', 'color-warning', 'color-danger']

@@ -12,6 +12,11 @@
     } catch (e) {
       document.documentElement.dataset.theme = 'dark'
     }
+    // Sidebar open = long scrolling page whose sidebar links scroll to sections; closed = the one-screen dashboard.
+    var side = 'open'
+    try { side = localStorage.getItem('sidebar') === 'closed' ? 'closed' : 'open' } catch (e) {}
+    document.documentElement.dataset.sidebar = side
+    document.documentElement.dataset.layout = side === 'open' ? 'scroll' : 'compact'
   </script>
   <title>LineLedger</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -29,23 +34,24 @@
       <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM5 11a7 7 0 0014 0M12 18v3" /></symbol>
       <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z" /></symbol>
       <symbol id="i-theme" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 3v18" /><path d="M12 3a9 9 0 010 18z" fill="currentColor" /></symbol>
+      <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></symbol>
     </defs>
   </svg>
 
   <div class="app">
-    <aside class="sidebar" aria-label="Sidebar">
-      <a class="brand" href="#/home">LineLedger<span class="sub">Factory-Floor Co-pilot</span></a>
+    <aside class="sidebar" id="sidebar" aria-label="Sidebar">
+      <a class="brand" href="#home">LineLedger<span class="sub">Factory-Floor Co-pilot</span></a>
       <nav class="nav" aria-label="Primary">
         <p class="nav-label">General</p>
-        <a href="#/home" data-view="home"><svg class="ico" aria-hidden="true"><use href="#i-home" /></svg>Home</a>
-        <a href="#/assistant" data-view="assistant"><svg class="ico" aria-hidden="true"><use href="#i-chat" /></svg>Assistant</a>
+        <a href="#home" data-view="home"><svg class="ico" aria-hidden="true"><use href="#i-home" /></svg>Home</a>
+        <a href="#chat-card" data-view="assistant"><svg class="ico" aria-hidden="true"><use href="#i-chat" /></svg>Assistant</a>
         <p class="nav-label">Tools</p>
-        <a href="#/followups" data-view="followups"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Follow-ups<span class="count" id="followup-count">-</span></a>
-        <a href="#/handover" data-view="handover"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
-        <a href="#/container" data-view="container"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
+        <a href="#followups-card" data-view="followups"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Follow-ups<span class="count" id="followup-count">-</span></a>
+        <a href="#notes-card" data-view="handover"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
+        <a href="#container-card" data-view="container"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
         <p class="nav-label">Insights</p>
-        <a href="#/trace" id="open-trace" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
+        <a href="#trace-card" id="open-trace" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
       </nav>
       <div class="sidebar-foot">
         <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
@@ -55,7 +61,9 @@
 
     <div class="main">
       <header class="topbar">
+        <button type="button" id="sidebar-toggle" class="icon-btn" aria-controls="sidebar" aria-expanded="true" aria-label="Close sidebar" title="Close or open the sidebar"><svg class="ico" aria-hidden="true"><use href="#i-sidebar" /></svg></button>
         <p class="crumb"><span class="muted">Dashboard</span> / <span id="crumb-view">Home</span></p>
+        <p class="chip" id="synthetic-chip"><span class="badge">SYNTHETIC DEMO DATA</span> <span class="chip-dot" id="chip-dot" data-state="connecting" aria-hidden="true">●</span></p>
         <form id="composer" class="composer" autocomplete="off">
           <label for="text" class="sr-only">Type a request</label>
           <input id="text" name="text" type="text" placeholder="Type a request (press /)" maxlength="400" />
@@ -67,8 +75,8 @@
         <button type="button" id="theme" class="icon-btn" aria-pressed="false" aria-label="Light theme" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-theme" /></svg></button>
       </header>
 
-      <main class="content" id="content" data-view="home">
-        <div class="top">
+      <main class="content" id="content">
+        <div class="top" id="home">
         <section class="hero" aria-labelledby="hero-h">
           <h2 id="hero-h" class="eyebrow">Plant output</h2>
           <p class="muted" id="hero-sub">Loading shift output...</p>
@@ -92,7 +100,7 @@
           <section class="card chat" id="chat-card" aria-labelledby="chat-h">
             <h2 id="chat-h">Chat</h2>
             <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
-            <div class="suggest" data-only="assistant" hidden role="group" aria-label="Example requests">
+            <div class="suggest" data-expanded hidden role="group" aria-label="Example requests">
               <button type="button" data-say="shift summary">Shift summary</button>
               <button type="button" data-say="open follow-ups">Open follow-ups</button>
               <button type="button" data-say="add handover note for line 2: belt tension checked">Add handover note</button>
@@ -116,13 +124,13 @@
           <section class="card" id="followups-card" aria-labelledby="followups-h">
             <div class="card-head">
               <h2 id="followups-h">Open follow-ups</h2>
-              <div class="seg" data-only="followups" hidden role="group" aria-label="Show follow-ups">
+              <div class="seg" data-expanded hidden role="group" aria-label="Show follow-ups">
                 <button type="button" data-filter="open" aria-pressed="true">Open</button>
                 <button type="button" data-filter="closed" aria-pressed="false">Closed</button>
                 <button type="button" data-filter="all" aria-pressed="false">All</button>
               </div>
             </div>
-            <form id="followup-form" class="form" data-only="followups" hidden autocomplete="off">
+            <form id="followup-form" class="form" data-expanded hidden autocomplete="off">
               <h3>Add a follow-up</h3>
               <label>Task<input name="title" required maxlength="120" placeholder="Re-check the guard" /></label>
               <label>Owner<input name="owner" required maxlength="60" placeholder="Ravi" /></label>
@@ -135,7 +143,7 @@
           </section>
           <section class="card" id="notes-card" aria-labelledby="notes-h">
             <div class="card-head"><h2 id="notes-h">Handover notes</h2></div>
-            <form id="note-form" class="form" data-only="handover" hidden autocomplete="off">
+            <form id="note-form" class="form" data-expanded hidden autocomplete="off">
               <h3>Add a handover note</h3>
               <label>Your name and shift<input name="author" required maxlength="60" placeholder="Asha (shift B)" /></label>
               <label>Line<select name="line_id"><option value="">All lines</option></select></label>
@@ -147,7 +155,7 @@
           </section>
           <section class="card" id="container-card" aria-labelledby="container-h">
             <div class="card-head"><h2 id="container-h">Container load</h2></div>
-            <form id="container-form" class="form" data-only="container" hidden autocomplete="off">
+            <form id="container-form" class="form" data-expanded hidden autocomplete="off">
               <h3>How many boxes fit?</h3>
               <label>Container<select name="container_type"><option value="20ft">20 ft</option><option value="40ft">40 ft</option></select></label>
               <div class="form-row">

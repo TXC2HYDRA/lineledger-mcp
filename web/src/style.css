@@ -41,8 +41,6 @@
 
   /* Glass: translucent fills over the page glow. Percentages are the opacity of the fill.
      scripts/check-contrast.ts composites them over the worst-case backdrop, so keep them numeric. */
-  --blob-a: #222B42;          /* quiet slate-blue discs behind the glass */
-  --blob-b: #1C2230;
   --glass-pct: 55%;           /* cards, sidebar */
   --sheen-pct: 3%;            /* diagonal highlight across each glass card */
   --lift-pct: 5%;             /* white lift for controls and rows sitting on glass */
@@ -80,8 +78,6 @@
   --color-danger: #B42318;
   --color-focus: #B03A06;
 
-  --blob-a: #D6E0F2;          /* quiet slate-blue discs behind the glass */
-  --blob-b: #E3E8F0;
   --glass-pct: 48%;
   --pill-pct: 90%;
   --drawer-pct: 94%;
@@ -99,11 +95,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background:
-    /* two quiet hard-edged discs: the blur on glass is only visible where the backdrop has an edge */
-    radial-gradient(circle 170px at 66% 38%, var(--blob-a) 0 98%, transparent 100%),
-    radial-gradient(circle 130px at 24% 84%, var(--blob-b) 0 98%, transparent 100%),
-    var(--color-bg);
+  background: var(--color-bg);
   background-attachment: fixed;
   color: var(--color-text);
   font: 400 var(--text-body)/1.45 var(--font-sans);
@@ -396,33 +388,61 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 .suggest { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .suggest button { border-radius: 999px; font-weight: 500; font-size: var(--text-xs); }
 
-/* Views: the sidebar picks one section and it takes the whole page. Same DOM as the dashboard, no copies. */
-.content:not([data-view="home"]) > .top { display: none; }
-.content:not([data-view="home"]) :is(.split, .trio) { display: contents; }
-.content:not([data-view="home"]) :is(.split, .trio) > .card { display: none; }
-.content[data-view="assistant"] #chat-card,
-.content[data-view="followups"] #followups-card,
-.content[data-view="handover"] #notes-card,
-.content[data-view="container"] #container-card { display: flex; flex: 1 1 auto; min-height: 0; height: auto; overflow: auto; }
-.content[data-view="followups"] #followups-card,
-.content[data-view="handover"] #notes-card,
-.content[data-view="container"] #container-card {
+/* Sidebar open: one long page. Each sidebar link is a section that scrolls into view; same DOM as the compact dashboard. */
+:root[data-layout="scroll"] .content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; }
+:root[data-layout="scroll"] .content > .top { grid-column: 1 / -1; }
+:root[data-layout="scroll"] :is(.split, .trio) { display: contents; }
+:root[data-layout="scroll"] :is(.split, .trio) > .card { height: auto; overflow: visible; }
+:root[data-layout="scroll"] #bars-card { order: 1; min-height: 360px; }
+:root[data-layout="scroll"] #trend-card { order: 2; min-height: 360px; }
+:root[data-layout="scroll"] #chat-card { order: 3; }
+:root[data-layout="scroll"] #followups-card { order: 4; }
+:root[data-layout="scroll"] #notes-card { order: 5; }
+:root[data-layout="scroll"] #container-card { order: 6; }
+:root[data-layout="scroll"] #trace-card { order: 7; }
+/* each tool section is about one screen tall, so every sidebar link can bring its section to the top */
+:root[data-layout="scroll"] :is(#chat-card, #followups-card, #notes-card, #container-card) { grid-column: 1 / -1; min-height: max(480px, calc(100vh - 180px)); }
+:root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) {
   display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-4) var(--space-6); align-content: start;
 }
-.content[data-view] #followups-card .card-head, .content[data-view] #notes-card .card-head, .content[data-view] #container-card .card-head { grid-column: 1 / -1; }
-.content[data-view="followups"] #followups-card .form, .content[data-view="handover"] #notes-card .form, .content[data-view="container"] #container-card .form { grid-column: 1; grid-row: 2; align-self: start; }
-.content[data-view="followups"] #followups, .content[data-view="handover"] #notes, .content[data-view="container"] #container { grid-column: 2; grid-row: 2; min-height: 0; overflow: auto; }
-.content[data-view="assistant"] .msg { max-width: min(95%, 760px); }
-.content[data-view="container"] .layer span { height: 20px; }
-.content[data-view="container"] .metric { font-size: var(--text-hero); }
+:root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) .card-head { grid-column: 1 / -1; }
+:root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) .form { grid-column: 1; grid-row: 2; align-self: start; }
+:root[data-layout="scroll"] :is(#followups, #notes, #container) { grid-column: 2; grid-row: 2; min-height: 0; }
+:root[data-layout="scroll"] .msg { max-width: min(95%, 760px); }
+:root[data-layout="scroll"] .layer span { height: 20px; }
+:root[data-layout="scroll"] .metric { font-size: var(--text-hero); }
+:root[data-layout="scroll"] #trace-card { grid-column: 1 / -1; }
 
 @media (max-width: 1100px) {
-  .content[data-view="followups"] #followups-card,
-  .content[data-view="handover"] #notes-card,
-  .content[data-view="container"] #container-card { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  .content[data-view] #followups-card .form, .content[data-view] #notes-card .form, .content[data-view] #container-card .form,
-  .content[data-view] #followups, .content[data-view] #notes, .content[data-view] #container { grid-column: 1; grid-row: auto; }
+  :root[data-layout="scroll"] .content { grid-template-columns: minmax(0, 1fr); }
+  :root[data-layout="scroll"] :is(#bars-card, #trend-card) { grid-column: 1; }
+  :root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  :root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) .form,
+  :root[data-layout="scroll"] :is(#followups, #notes, #container) { grid-column: 1; grid-row: auto; }
+}
+
+/* Sidebar slide and content swap. Deliberately slow. */
+:root { --motion-slow: 900ms; --ease-slow: cubic-bezier(0.22, 0.61, 0.36, 1); }
+.app { transition: grid-template-columns var(--motion-slow) var(--ease-slow); }
+.sidebar { min-width: 0; overflow-x: hidden; transition: padding var(--motion-slow) var(--ease-slow), opacity 700ms var(--ease-slow), transform var(--motion-slow) var(--ease-slow), border-color var(--motion-slow), visibility 0s; }
+.sidebar > * { width: calc(264px - 2 * var(--space-4) - 1px); flex: none; }
+:root[data-sidebar="closed"] .app { grid-template-columns: 0px minmax(0, 1fr); }
+:root[data-sidebar="closed"] .sidebar { padding-inline: 0; opacity: 0; transform: translateX(-32px); border-color: transparent; overflow: hidden; visibility: hidden; transition-delay: 0s, 0s, 0s, 0s, var(--motion-slow); }
+.content { transition: opacity 500ms ease, transform 500ms var(--ease-slow); }
+.content.swap { opacity: 0; transform: translateY(10px); }
+
+.chip { display: none; margin: 0; padding: var(--space-1) var(--space-3); border: 1px solid var(--color-border); border-radius: 999px; background: var(--glass-lift); white-space: nowrap; }
+:root[data-sidebar="closed"] .chip { display: inline-flex; align-items: center; gap: var(--space-2); }
+.chip-dot[data-state="connected"] { color: var(--color-success); }
+.chip-dot[data-state="error"] { color: var(--color-danger); }
+.chip-dot[data-state="connecting"] { color: var(--color-text-muted); }
+
+@media (max-width: 1100px) {
+  .sidebar > * { width: auto; }
+  .sidebar { max-height: 480px; overflow: hidden; transition: max-height var(--motion-slow) var(--ease-slow), padding var(--motion-slow) var(--ease-slow), opacity 700ms var(--ease-slow), visibility 0s; }
+  :root[data-sidebar="closed"] .app { grid-template-columns: minmax(0, 1fr); }
+  :root[data-sidebar="closed"] .sidebar { max-height: 0; padding-block: 0; transform: none; border-bottom-color: transparent; transition-delay: 0s, 0s, 0s, var(--motion-slow); }
 }
 
 /* No blur support, or the user asked for less transparency: fall back to the solid surfaces. */

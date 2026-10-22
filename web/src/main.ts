@@ -28,12 +28,16 @@ function icon(name: string): SVGSVGElement {
 
 const mcp = new McpConnection()
 
-// ---- views: one hash route per sidebar item; CSS decides what each view shows -----------------
-const VIEWS = ['home', 'assistant', 'followups', 'handover', 'container'] as const
-type View = (typeof VIEWS)[number]
-const VIEW_TITLE: Record<View, string> = { home: 'Home', assistant: 'Assistant', followups: 'Follow-ups', handover: 'Handover', container: 'Container load' }
-const VIEW_HEADING: Record<View, string> = { home: '#hero-h', assistant: '#chat-h', followups: '#followups-h', handover: '#notes-h', container: '#container-h' }
-let view: View = 'home'
+// ---- layout: sidebar open = long scrolling page, closed = one-screen dashboard ---------------------
+const root = document.documentElement
+const expanded = () => root.dataset.layout === 'scroll'
+const SECTIONS = [
+  { name: 'home', label: 'Home', id: 'home' },
+  { name: 'assistant', label: 'Assistant', id: 'chat-card' },
+  { name: 'followups', label: 'Follow-ups', id: 'followups-card' },
+  { name: 'handover', label: 'Handover', id: 'notes-card' },
+  { name: 'container', label: 'Container load', id: 'container-card' },
+] as const
 let followFilter: 'open' | 'closed' | 'all' = 'open'
 
 // ---- connection + voice state ---------------------------------------------------------------
@@ -42,6 +46,8 @@ function setConn(state: keyof typeof CONN_ICON, text: string) {
   $('conn').dataset.state = state
   $('conn').querySelector('.icon')!.textContent = CONN_ICON[state]
   $('conn-text').textContent = text
+  $('chip-dot').dataset.state = state
+  $('synthetic-chip').title = text
 }
 
 const VOICE_ICON: Record<VoiceState, string> = { idle: '○', listening: '🎙', thinking: '…', speaking: '🔊', error: '⚠' }
@@ -193,7 +199,7 @@ const row = (iconName: string, main: (Node | string)[], aside?: Node) =>
 
 async function refreshNotes() {
   try {
-    const { notes } = await data('list_handover_notes', { limit: view === 'handover' ? 50 : 2 })
+    const { notes } = await data('list_handover_notes', { limit: expanded() ? 50 : 2 })
     if (!notes.length) return panel('notes', 'empty', muted('No handover notes yet.'))
     panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author} · ${String(n.created_at).slice(0, 16).replace('T', ' ')}`)]))))
   } catch (e) {
@@ -203,7 +209,7 @@ async function refreshNotes() {
 
 async function refreshFollowUps() {
   try {
-    const status = view === 'followups' ? followFilter : 'open' // the home card and the badge always mean open items
+    const status = expanded() ? followFilter : 'open' // the compact card and the badge always mean open items
     const { follow_ups } = await data('list_follow_ups', { status })
     if (status !== 'closed') $('followup-count').textContent = String((follow_ups as Data[]).filter((f) => f.status === 'open').length)
     if (!follow_ups.length) return panel('followups', 'empty', muted(status === 'closed' ? 'No closed follow-ups.' : 'No open follow-ups.'))
@@ -264,7 +270,7 @@ async function askAgent(text: string): Promise<{ reply: string; tool_calls: { na
 let busy = false
 async function send(text: string, fromVoice: boolean, navigate = true) {
   if (busy || !text.trim()) return
-  if (navigate && view !== 'home' && view !== 'assistant') location.hash = '#/assistant' // the answer appears in the chat
+  if (navigate && expanded() && activeSection !== 'assistant') scrollToSection('chat-card') // the answer appears in the chat
   busy = true
   addMessage('You', text, 'user')
   if (modelMode) {
@@ -430,27 +436,97 @@ document.addEventListener('keydown', (ev) => {
 })
 
 // ---- views, forms, theme ------------------------------------------------------------------------
-function showView(next: View, moveFocus: boolean) {
-  const changed = next !== view
-  view = next
-  $('content').dataset.view = view
-  $('crumb-view').textContent = VIEW_TITLE[view]
-  document.title = `${VIEW_TITLE[view]} · LineLedger`
-  document.querySelectorAll<HTMLAnchorElement>('.nav a[data-view]').forEach((a) => (a.dataset.view === view ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')))
-  document.querySelectorAll<HTMLElement>('[data-only]').forEach((el) => (el.hidden = el.dataset.only !== view))
-  if (changed) void Promise.all([refreshNotes(), refreshFollowUps()]) // list sizes and filters depend on the view
-  if (moveFocus) {
-    const heading = document.querySelector<HTMLElement>(VIEW_HEADING[view])
-    heading?.setAttribute('tabindex', '-1')
-    heading?.focus({ preventScroll: true })
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+const content = $('content')
+// Desktop scrolls .content; below 1100px the page itself scrolls.
+const scroller = () => (content.scrollHeight > content.clientHeight + 1 && getComputedStyle(content).overflowY !== 'visible' ? content : (document.scrollingElement as HTMLElement))
+const edgeTop = () => (scroller() === content ? content.getBoundingClientRect().top : 0)
+
+let scrollAnim = 0
+function scrollToSection(id: string) {
+  const el = $(id)
+  const box = scroller()
+  const target = id === 'home' ? 0 : Math.max(0, box.scrollTop + el.getBoundingClientRect().top - edgeTop() - 16)
+  cancelAnimationFrame(scrollAnim)
+  const from = box.scrollTop
+  const dist = target - from
+  const ms = reduceMotion() ? 0 : Math.min(1800, 800 + Math.abs(dist) * 0.5) // long, but longer trips take longer
+  if (!ms || !dist) return void (box.scrollTop = target)
+  const t0 = performance.now()
+  const step = (now: number) => {
+    const p = Math.min(1, (now - t0) / ms)
+    box.scrollTop = from + dist * (p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2) // ease in-out cubic
+    if (p < 1) scrollAnim = requestAnimationFrame(step)
   }
+  scrollAnim = requestAnimationFrame(step)
 }
-const viewFromHash = (): View => {
-  const name = location.hash.replace(/^#\/?/, '')
-  return (VIEWS as readonly string[]).includes(name) ? (name as View) : 'home'
+
+// Scrollspy: the last section whose top has passed the top edge is current.
+let activeSection = 'home'
+function spy() {
+  let name: string = 'home'
+  if (expanded()) {
+    const box = scroller()
+    const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 4
+    for (const sec of SECTIONS) if ($(sec.id).getBoundingClientRect().top - edgeTop() <= 160) name = sec.name
+    if (atEnd) name = SECTIONS.at(-1)!.name
+  }
+  activeSection = name
+  $('crumb-view').textContent = SECTIONS.find((x) => x.name === name)!.label
+  document.querySelectorAll<HTMLAnchorElement>('.nav a[data-view]').forEach((a) => (a.dataset.view === name ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')))
 }
-window.addEventListener('hashchange', () => showView(viewFromHash(), true))
-showView(viewFromHash(), false)
+content.addEventListener('scroll', spy, { passive: true })
+window.addEventListener('scroll', spy, { passive: true })
+window.addEventListener('resize', spy)
+
+document.querySelectorAll<HTMLAnchorElement>('.nav a[data-view]').forEach((a) =>
+  a.addEventListener('click', (ev) => {
+    ev.preventDefault()
+    const sec = SECTIONS.find((x) => x.name === a.dataset.view)!
+    scrollToSection(sec.id)
+    try {
+      history.replaceState(null, '', `#${sec.id}`)
+    } catch {
+      // not essential
+    }
+  }),
+)
+
+function applyLayout() {
+  const open = expanded()
+  document.querySelectorAll<HTMLElement>('[data-expanded]').forEach((el) => (el.hidden = !open))
+  void Promise.all([refreshNotes(), refreshFollowUps()]) // list sizes and the filter depend on the layout
+  spy()
+}
+
+// Toggle: the sidebar starts sliding at once; the content fades out, switches layout while hidden, then fades in.
+const toggle = $('sidebar-toggle') as HTMLButtonElement
+let switching = false
+function setSidebar(open: boolean) {
+  if (switching) return
+  switching = true
+  root.dataset.sidebar = open ? 'open' : 'closed'
+  toggle.setAttribute('aria-expanded', String(open))
+  toggle.setAttribute('aria-label', open ? 'Close sidebar' : 'Open sidebar')
+  try {
+    localStorage.setItem('sidebar', open ? 'open' : 'closed')
+  } catch {
+    // the choice still applies for this visit
+  }
+  const wait = reduceMotion() ? 0 : 500
+  content.classList.add('swap')
+  setTimeout(() => {
+    root.dataset.layout = open ? 'scroll' : 'compact'
+    scroller().scrollTop = 0
+    applyLayout()
+    requestAnimationFrame(() => content.classList.remove('swap'))
+    setTimeout(() => (switching = false), wait)
+  }, wait)
+}
+toggle.addEventListener('click', () => setSidebar(root.dataset.sidebar !== 'open'))
+toggle.setAttribute('aria-expanded', String(root.dataset.sidebar === 'open'))
+toggle.setAttribute('aria-label', root.dataset.sidebar === 'open' ? 'Close sidebar' : 'Open sidebar')
+applyLayout()
 
 document.querySelectorAll<HTMLButtonElement>('.seg [data-filter]').forEach((b) =>
   b.addEventListener('click', () => {
