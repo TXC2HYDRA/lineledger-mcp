@@ -61,6 +61,7 @@ describe('protocol', () => {
       'close_follow_up',
       'create_follow_up',
       'create_handover_note',
+      'get_shift_history',
       'get_shift_summary',
       'list_follow_ups',
       'list_handover_notes',
@@ -92,6 +93,20 @@ describe('tools', () => {
     expect(a.structuredContent!.lines[0].status).toBe('on_track')
     const none = await call(client, 'get_shift_summary', { shift_date: '2020-01-01' })
     expect(none.isError).toBe(true)
+  })
+
+  it('returns shift history oldest first, honours limit and matches the summary', async () => {
+    const { client } = await connect()
+    const all = (await call(client, 'get_shift_history')).structuredContent!.shifts
+    expect(all).toHaveLength(14)
+    expect(all[0]).toMatchObject({ shift_date: '2026-10-15', shift: 'A' })
+    expect(all.at(-1)).toMatchObject({ shift_date: '2026-10-21', shift: 'B' })
+    expect(all.every((s: { lines: unknown[] }) => s.lines.length === 2)).toBe(true)
+    const last3 = (await call(client, 'get_shift_history', { limit: 3 })).structuredContent!.shifts
+    expect(last3.map((s: { shift: string }) => s.shift)).toEqual(['B', 'A', 'B'])
+    const summary = (await call(client, 'get_shift_summary')).structuredContent!.lines
+    expect(all.at(-1).lines.map((l: { percent_of_target: number }) => l.percent_of_target)).toEqual(summary.map((l: { percent_of_target: number }) => l.percent_of_target))
+    expect((await call(client, 'get_shift_history', { limit: 1 })).isError).toBe(true)
   })
 
   it('creates and lists handover notes, newest first, filters by line, honours limit', async () => {
