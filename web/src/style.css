@@ -421,7 +421,10 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 :root[data-layout="scroll"] #container-card { order: 6; }
 :root[data-layout="scroll"] #trace-card { order: 7; }
 /* each tool section is about one screen tall, so every sidebar link can bring its section to the top */
-:root[data-layout="scroll"] :is(#chat-card, #followups-card, #notes-card, #container-card) { grid-column: 1 / -1; min-height: max(480px, calc(100vh - 180px)); }
+:root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) { grid-column: 1 / -1; min-height: max(480px, calc(100vh - 180px)); }
+/* chat starts small and grows with the conversation up to one screen, then the transcript scrolls */
+:root[data-layout="scroll"] #chat-card { grid-column: 1 / -1; max-height: max(480px, calc(100vh - 180px)); }
+:root[data-layout="scroll"] #chat-card .transcript { flex: 0 1 auto; min-height: 0; }
 :root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) {
   display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-4) var(--space-6); align-content: start;

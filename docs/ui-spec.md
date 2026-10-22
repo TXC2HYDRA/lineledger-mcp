@@ -82,10 +82,10 @@ The sidebar toggle (top bar, left) switches between two layouts built from the s
 
 | Sidebar | Layout | What it is |
 |---|---|---|
-| Open (default) | `data-layout="scroll"` | One long page: hero and line cards, output and trend charts, then a full-size Assistant, Follow-ups, Handover and Container load section, then the trace tile. The forms, the Open/Closed/All filter and the chat example chips are shown, and lists are not truncated. |
+| Open (default) | `data-layout="scroll"` | One long page: hero and line cards, output and trend charts, then an Assistant section whose chat starts small and grows with the conversation up to one screen (then the transcript scrolls), and full-size Follow-ups, Handover and Container load sections, then the trace tile. The forms, the Open/Closed/All filter and the chat example chips are shown, and lists are not truncated. |
 | Closed | `data-layout="compact"` | The one-screen dashboard. A small "SYNTHETIC DEMO DATA" chip with a connection dot appears in the top bar so the notice is never hidden. |
 
-Sidebar links (open layout): Home, Assistant, Follow-ups, Handover and Container load scroll their section to the top with an eased scroll of 0.8 to 1.8 s (instant under `prefers-reduced-motion`). The active link and the breadcrumb follow the scroll position (scroll-spy) and the last link stays current at the end of the page. Each tool section is about one screen tall, so every link can bring its section to the top. MCP trace still opens the drawer. Sending a request from the top bar scrolls to Assistant, where the answer appears.
+Sidebar links (open layout): Home, Assistant, Follow-ups, Handover and Container load scroll their section to the top with an eased scroll of 0.8 to 1.8 s (instant under `prefers-reduced-motion`). The active link and the breadcrumb follow the scroll position (scroll-spy) and the last link stays current at the end of the page. The form sections are about one screen tall, so their links can bring them to the top. MCP trace still opens the drawer. Sending a request from the top bar scrolls to Assistant, where the answer appears.
 
 Transitions are deliberately slow. The sidebar slides and fades over 900 ms while the grid column closes. The content fades out (500 ms), switches layout while hidden, then fades in (500 ms). A second toggle press during the switch is ignored. A closed sidebar is `visibility: hidden` after the slide, so it leaves the tab order. Below 1100 px the sidebar is a top block that collapses by height instead of sliding sideways.
 ## Layout
