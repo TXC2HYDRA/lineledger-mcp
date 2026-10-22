@@ -1,27 +1,28 @@
 :root {
   color-scheme: dark;
 
-  --color-bg: #0B1220;
-  --color-surface: #111C2E;
-  --color-surface-raised: #19273B;
-  --color-border: #334155;
-  --color-border-strong: #64748B;
+  /* Surfaces: neutral near-black, solid cards over a static background glow */
+  --color-bg: #0A0A0B;
+  --color-surface: #121214;
+  --color-surface-raised: #1B1B1F;
+  --color-border: #2A2A30;          /* decorative card edges only */
+  --color-border-strong: #6B6B76;   /* control boundaries: >= 3:1 on every surface */
 
-  --color-text: #F1F5F9;
-  --color-text-muted: #B7C4D8;
+  --color-text: #F5F5F6;
+  --color-text-muted: #A8A8B3;
 
-  --color-accent: #2DD4BF;
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-danger: #F87171;
-  --color-focus: #2DD4BF;
+  --color-accent: #FF5A1F;          /* labels on accent fills use --color-bg */
+  --color-success: #34D399;
+  --color-warning: #FBBF24;
+  --color-danger: #FF6B6B;
+  --color-focus: #FF5A1F;
 
   --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
   --text-xs: 14px;
   --text-body: 18px;
   --text-section: 24px;
   --text-metric: 32px;
-  --text-hero: 40px;
+  --text-hero: 56px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -31,9 +32,9 @@
   --space-8: 32px;
   --space-12: 48px;
 
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-panel: 16px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-panel: 20px;
 
   --motion-fast: 120ms;
   --motion-normal: 180ms;
@@ -46,7 +47,8 @@ body {
   margin: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
+  background: radial-gradient(900px 500px at 70% -10%, rgba(255, 90, 31, 0.14), transparent 70%), var(--color-bg);
+  background-attachment: fixed;
   color: var(--color-text);
   font: 400 var(--text-body)/1.45 var(--font-sans);
 }
@@ -120,6 +122,7 @@ button, input {
 input::placeholder { color: var(--color-text-muted); }
 button { cursor: pointer; font-weight: 600; }
 button:hover:not(:disabled) { background: var(--color-bg); }
+button[type="submit"]:hover:not(:disabled) { background: var(--color-accent); filter: brightness(1.1); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 button[type="submit"] { background: var(--color-accent); color: var(--color-bg); border-color: var(--color-accent); }
 button[aria-pressed="true"] { border-color: var(--color-accent); color: var(--color-accent); }
