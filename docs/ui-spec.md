@@ -68,11 +68,11 @@ Translucent surfaces, worst case. "Page glow" is text placed directly on the pag
 | warning | 7.83 | 9.84 | 7.85 | 9.21 | 8.67 |
 | danger | 5.17 | 6.51 | 5.19 | 6.09 | 5.73 |
 
-Dark label (`--color-bg`) on accent fill: 6.9 or better. All 162 pairs (81 per theme) pass: text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
+Dark label (`--color-bg`) on accent fill: 6.9 or better. All 210 pairs pass (81 on dark, 129 on light): text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
 
 ### Light theme
 
-Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light: glow 10%, glass 62%, sheen 40% white, lift 5% black, pill 90%, drawer 94%.
+Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light: glow 10%, glass 48%, sheen 22% white, lift 5% black, pill 90%, drawer 94%. A white page gives the blur nothing to show, so the light page has three pastel fields and hard-edged discs (`--blob-a` `#FFD9C0`, `--blob-b` `#FBD3EA`, `--blob-c` `#D8E0FF`); the contrast check tests text on each blob and on glass over each.
 
 The theme is set before first paint from the saved choice (`localStorage`, wrapped in try/catch), else the system preference. The toggle sits at the right of the top bar (`aria-pressed`, `aria-label`). `npm run check:contrast` checks both themes against their own worst-case surfaces; on light it assumes dense text covers 40% of the area behind the pill and drawer.
 

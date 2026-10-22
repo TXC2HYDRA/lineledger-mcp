@@ -62,6 +62,14 @@ for (const [name, { vars, pct }] of Object.entries(themes)) {
     surfaces[`drawer + lift (over ${label})`] = over(vars['lift-color']!, pct['lift-pct']!, drawer)
   }
 
+  // pastel backdrop blobs (light theme): text must also hold on the blob itself and under glass over it
+  for (const k of ['blob-a', 'blob-b', 'blob-c']) {
+    if (!vars[k]) continue
+    const g = over(vars['color-surface']!, pct['glass-pct']!, vars[k]!)
+    surfaces[`${k}`] = vars[k]!
+    surfaces[`glass + sheen + lift (over ${k})`] = over(vars['lift-color']!, pct['lift-pct']!, over(vars['sheen-color']!, pct['sheen-pct']!, g))
+  }
+
   const text = ['color-text', 'color-text-muted', 'color-accent', 'color-success', 'color-warning', 'color-danger']
   const entries = Object.entries(surfaces)
   const pairs: Pair[] = [
