@@ -10,6 +10,7 @@ Machine: Linux x86_64, CPU only, 30 GB RAM (about 9 GiB available at check time)
 
 - 2026-10-21: C (npm packages) approved and installed. Planner dependency `container-load-planner#3c4fe91` (HTTPS git, MIT) approved and installed. B (Python packages, `.venv/`, 49 packages, 112 MB) approved and installed after a `pip install --dry-run` matched this list.
 - A1 and A2 (Ollama tarball and `qwen3:4b`): approved; the user runs the steps below. Not yet downloaded when this was written.
+- 2026-10-22: `qwen3:4b` (thinking variant) failed the spike and was deleted. The user approved `qwen3:4b-instruct` (ID `0edcdef34593`, about 2.5 GB, ollama.com), pulled through the local Ollama server. See `docs/spike-results.md`.
 - Not approved: A3, D1, D2, any hosted API.
 
 ## Recommended approval set (about 4.1 GB download)
