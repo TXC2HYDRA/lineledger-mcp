@@ -1,6 +1,12 @@
 // Turns structured tool results into short sentences for the transcript and for speech.
 type Data = Record<string, any>
 
+export type Status = 'on_track' | 'at_risk' | 'behind'
+
+// Same thresholds as get_shift_summary on the server (>= 95 on track, >= 80 at risk).
+export const statusOf = (percent: number): Status => (percent >= 95 ? 'on_track' : percent >= 80 ? 'at_risk' : 'behind')
+export const STATUS_LABEL: Record<Status, string> = { on_track: '▲ ON TRACK', at_risk: '◆ AT RISK', behind: '▼ BEHIND' }
+
 export function summarize(tool: string, d: Data): string {
   switch (tool) {
     case 'get_shift_summary': {

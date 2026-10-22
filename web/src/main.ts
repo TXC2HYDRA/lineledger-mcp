@@ -1,4 +1,4 @@
-import { summarize } from './format.js'
+import { STATUS_LABEL, statusOf, summarize, type Status } from './format.js'
 import { McpConnection, type ToolResult } from './mcp.js'
 import { plan } from './planner.js'
 import { canListen, canSpeak, listen, speak, stopSpeaking } from './voice.js'
@@ -13,6 +13,17 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, 
   for (const [k, v] of Object.entries(props)) node.setAttribute(k, v)
   node.append(...children)
   return node
+}
+
+const SVG = 'http://www.w3.org/2000/svg'
+function icon(name: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG, 'svg')
+  svg.setAttribute('class', 'ico')
+  svg.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS(SVG, 'use')
+  use.setAttribute('href', `#i-${name}`)
+  svg.append(use)
+  return svg
 }
 
 const mcp = new McpConnection()
@@ -56,34 +67,85 @@ async function data(name: string, args: Record<string, unknown> = {}): Promise<D
   return r.structuredContent ?? {}
 }
 
-async function refreshShift() {
-  try {
-    const d = await data('get_shift_summary')
-    panel(
-      'shift',
-      'populated',
-      h('p', { class: 'muted' }, `Shift ${d.shift} · ${d.shift_date} · output / target`),
-      h('p', { class: 'metric' }, `${d.totals.percent_of_target}%`),
-      ...(d.lines as Data[]).map((l) =>
-        h(
-          'div',
-          { class: 'line-row' },
-          h('div', { class: 'line-head' }, h('span', {}, `${l.name} · ${l.product}`), h('span', { class: 'status', 'data-status': l.status }, `${l.status.replace('_', ' ').toUpperCase()}`)),
-          h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${l.produced_units} of ${l.target_units}, ${l.percent_of_target} percent` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, l.percent_of_target)}%` })),
-          h('span', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+// Two small vertical-bar charts built from the shift summary. Bars are scaled in CSS; every value is also printed.
+function renderBars(lines: Data[]) {
+  const group = (title: string, value: (l: Data) => number, max: number, label: (l: Data) => string, worst: Data) =>
+    h(
+      'div',
+      { class: 'bar-group' },
+      h('h3', {}, title),
+      h(
+        'div',
+        { class: 'bar-cols' },
+        ...lines.map((l) =>
+          h(
+            'div',
+            { class: 'bar-col', 'data-worst': String(l === worst) },
+            h('span', { class: 'bar-val' }, label(l)),
+            h('div', { class: 'bar-track', role: 'img', 'aria-label': `${l.name}: ${label(l)}` }, h('span', { style: `height:${Math.max(2, Math.min(100, (value(l) / max) * 100))}%` })),
+            h('span', { class: 'muted' }, l.name),
+          ),
         ),
       ),
     )
+  const by = (f: (l: Data) => number, pick: (a: number, b: number) => number) => lines.reduce((a, l) => (pick(f(l), f(a)) === f(l) ? l : a))
+  const maxDown = Math.max(1, ...lines.map((l) => l.downtime_min))
+  $('bars').dataset.state = 'populated'
+  $('bars').replaceChildren(
+    group('Output, % of target', (l) => l.percent_of_target, 100, (l) => `${l.percent_of_target}%`, by((l) => l.percent_of_target, Math.min)),
+    group('Downtime, minutes', (l) => l.downtime_min, maxDown, (l) => `${l.downtime_min} min`, by((l) => l.downtime_min, Math.max)),
+  )
+}
+
+function setStatus(el: HTMLElement, status: Status) {
+  el.dataset.status = status
+  el.textContent = STATUS_LABEL[status]
+}
+
+async function refreshShift() {
+  try {
+    const d = await data('get_shift_summary')
+    const lines = d.lines as Data[]
+    const status = statusOf(d.totals.percent_of_target)
+    const downtime = lines.reduce((sum, l) => sum + l.downtime_min, 0)
+    $('hero-sub').textContent = `Shift ${d.shift} · ${d.shift_date} · output / target`
+    $('hero-metric').textContent = `${d.totals.percent_of_target}%`
+    setStatus($('hero-status'), status)
+    $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
+    renderBars(lines)
+    panel(
+      'shift',
+      'populated',
+      ...lines.map((l) => {
+        const st = h('span', { class: 'status' })
+        setStatus(st, l.status)
+        return h(
+          'article',
+          { class: 'card stat', 'data-status': l.status },
+          h('div', { class: 'stat-head' }, h('span', { class: 'tag' }, l.line_id), h('strong', {}, l.name), st),
+          h('p', { class: 'muted' }, l.product),
+          h('p', { class: 'stat-value' }, `${l.percent_of_target}%`),
+          h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${l.produced_units} of ${l.target_units}, ${l.percent_of_target} percent` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, l.percent_of_target)}%` })),
+          h('p', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+        )
+      }),
+    )
   } catch (e) {
+    $('hero-sub').textContent = 'Shift output unavailable.'
+    $('bars').dataset.state = 'error'
+    $('bars').replaceChildren(muted('Shift output unavailable.'))
     panel('shift', 'error', `Could not load shift output: ${errorText(e)}`)
   }
 }
+
+const row = (iconName: string, main: (Node | string)[], aside?: Node) =>
+  h('li', { class: 'row' }, h('span', { class: 'avatar' }, icon(iconName)), h('div', { class: 'row-main' }, ...main), ...(aside ? [aside] : []))
 
 async function refreshNotes() {
   try {
     const { notes } = await data('list_handover_notes', { limit: 5 })
     if (!notes.length) return panel('notes', 'empty', muted('No handover notes yet.'))
-    panel('notes', 'populated', h('ul', {}, ...(notes as Data[]).map((n) => h('li', {}, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`), h('br'), n.text))))
+    panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`)]))))
   } catch (e) {
     panel('notes', 'error', `Could not load notes: ${errorText(e)}`)
   }
@@ -92,17 +154,18 @@ async function refreshNotes() {
 async function refreshFollowUps() {
   try {
     const { follow_ups } = await data('list_follow_ups', { status: 'open' })
+    $('followup-count').textContent = String(follow_ups.length)
     if (!follow_ups.length) return panel('followups', 'empty', muted('No open follow-ups.'))
     panel(
       'followups',
       'populated',
       h(
         'ul',
-        {},
+        { class: 'rows' },
         ...(follow_ups as Data[]).map((f) => {
           const close = h('button', { type: 'button', 'aria-label': `Close follow-up ${f.id}: ${f.title}` }, 'Close')
           close.addEventListener('click', () => void send(`close follow-up ${f.id}`, false))
-          return h('li', { class: 'followup' }, h('span', {}, `#${f.id} ${f.title}`, h('br'), h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)), close)
+          return row('list', [`#${f.id} ${f.title}`, h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)], close)
         }),
       ),
     )
@@ -112,20 +175,27 @@ async function refreshFollowUps() {
 }
 
 function showContainer(d: Data) {
-  const row = (k: string, v: string) => h('li', {}, h('span', { class: 'muted' }, `${k}: `), v)
+  const kv = (k: string, v: string) => h('li', {}, h('span', { class: 'muted' }, `${k}: `), v)
+  const meter = (label: string, fraction: number, detail: string) =>
+    h(
+      'div',
+      { class: 'meter' },
+      h('div', { class: 'meter-head' }, h('span', { class: 'muted' }, label), h('strong', {}, detail)),
+      h('div', { class: 'bar', role: 'img', 'aria-label': `${label}: ${detail}` }, h('span', { 'data-status': 'accent', style: `width:${Math.min(100, fraction * 100)}%` })),
+    )
+  // One layer, drawn from the grid: along x across cells (capped so a big result stays readable).
+  const cols = Math.min(d.grid.across, 24)
+  const rowsN = Math.min(d.grid.along, 24)
+  const layer = h('div', { class: 'layer', role: 'img', 'aria-label': `One layer: ${d.grid.along} by ${d.grid.across} boxes, ${d.grid.layers} layers high`, style: `grid-template-columns:repeat(${cols},1fr)` }, ...Array.from({ length: cols * rowsN }, () => h('span')))
   panel(
     'container',
     'populated',
     h('p', { class: 'metric' }, `${d.count} boxes`),
-    h(
-      'ul',
-      {},
-      row('Limited by', d.limitedBy),
-      row('Grid', `${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers`),
-      row('Placed as (mm)', `${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height}`),
-      row('Volume used', `${Math.round(d.volumeUtilisation * 100)}%`),
-      row('Payload used', `${Math.round(d.payloadUtilisation * 100)}% (${d.totalWeightKg} kg)`),
-    ),
+    h('p', { class: 'muted' }, `Limited by ${d.limitedBy} · ${d.grid.layers} layers`),
+    layer,
+    meter('Volume used', d.volumeUtilisation, `${Math.round(d.volumeUtilisation * 100)}%`),
+    meter('Payload used', d.payloadUtilisation, `${Math.round(d.payloadUtilisation * 100)}% (${d.totalWeightKg} kg)`),
+    h('ul', {}, kv('Grid', `${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers`), kv('Placed as (mm)', `${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height}`)),
   )
 }
 
@@ -214,16 +284,42 @@ function traceLabel(e: Data): string {
   const tool = m.method === 'tools/call' ? ` ${m.params?.name}` : ''
   return `${e.dir === 'in' ? '→ request' : '← response'} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
 }
+const PULSE_CELLS = 49
+const pulse: ('in' | 'out' | 'err')[] = []
+let traceCount = 0
+function drawPulse() {
+  $('trace-count').textContent = String(traceCount)
+  $('trace-pulse').replaceChildren(...Array.from({ length: PULSE_CELLS }, (_, i) => h('span', { 'data-kind': pulse[i - (PULSE_CELLS - pulse.length)] ?? 'none' })))
+}
 function startTrace() {
   const list = $('trace-list')
+  drawPulse()
   const es = new EventSource('/api/trace/stream')
   es.onmessage = (ev) => {
     const e = JSON.parse(ev.data) as Data
     list.append(h('li', {}, h('details', {}, h('summary', {}, h('span', { class: `dir ${e.dir}` }, traceLabel(e))), h('pre', {}, JSON.stringify(e.message, null, 2)))))
     while (list.children.length > 200) list.firstElementChild!.remove()
     list.lastElementChild!.scrollIntoView({ block: 'end' })
+    pulse.push(e.message?.error ? 'err' : e.dir)
+    if (pulse.length > PULSE_CELLS) pulse.shift()
+    traceCount++
+    drawPulse()
   }
 }
+
+const traceDialog = $('trace-dialog') as HTMLDialogElement
+function openTrace() {
+  traceDialog.showModal()
+  $('trace-list').lastElementChild?.scrollIntoView({ block: 'end' })
+}
+$('trace-card').addEventListener('click', openTrace)
+$('open-trace').addEventListener('click', (ev) => {
+  ev.preventDefault()
+  openTrace()
+})
+traceDialog.addEventListener('click', (ev) => {
+  if (ev.target === traceDialog) traceDialog.close() // click on the backdrop
+})
 
 // ---- wiring ---------------------------------------------------------------------------------
 const input = $('text') as HTMLInputElement
@@ -233,7 +329,7 @@ $('composer').addEventListener('submit', (ev) => {
   input.value = ''
   void send(text, false)
 })
-document.querySelectorAll<HTMLButtonElement>('.chip').forEach((b) => b.addEventListener('click', () => void send(b.dataset.say!, false)))
+document.querySelectorAll<HTMLButtonElement>('[data-say]').forEach((b) => b.addEventListener('click', () => void send(b.dataset.say!, false)))
 
 const listenBtn = $('listen') as HTMLButtonElement
 let stopListening: (() => void) | null = null
