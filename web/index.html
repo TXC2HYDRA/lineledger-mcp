@@ -54,40 +54,52 @@
         </form>
       </header>
 
-      <main class="grid">
-        <section class="card chat" id="chat-card" aria-labelledby="chat-h">
-          <h2 id="chat-h">Chat</h2>
-          <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
-          <div class="chips" role="group" aria-label="Example requests">
-            <button type="button" class="chip" data-say="shift summary">Shift summary</button>
-            <button type="button" class="chip" data-say="open follow-ups">Open follow-ups</button>
-            <button type="button" class="chip" data-say="stock of hdpe">Stock of HDPE</button>
-            <button type="button" class="chip" data-say="how many 600x400x300 12kg boxes fit in a 20ft container">Container load</button>
+      <main class="content">
+        <section class="hero" aria-labelledby="hero-h">
+          <h2 id="hero-h" class="eyebrow">Plant output</h2>
+          <p class="muted" id="hero-sub">Loading shift output...</p>
+          <p class="hero-row"><span class="hero-metric" id="hero-metric">--</span> <span class="delta" id="hero-status" data-status="none"></span></p>
+          <p class="muted" id="hero-meta"></p>
+          <div class="actions" role="group" aria-label="Quick requests">
+            <button type="button" class="primary" data-say="shift summary"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>Shift summary</button>
+            <button type="button" data-say="open follow-ups"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Open follow-ups</button>
+            <button type="button" data-say="stock of hdpe"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Stock of HDPE</button>
+            <button type="button" data-say="how many 600x400x300 12kg boxes fit in a 20ft container"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</button>
           </div>
         </section>
 
-        <section class="card trace" id="trace-card" aria-labelledby="trace-h">
-          <h2 id="trace-h">Live MCP trace</h2>
-          <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
-          <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
+        <section class="cards" aria-label="Production lines">
+          <div id="shift" data-state="loading"><p class="muted">Loading shift output...</p></div>
+          <button type="button" class="card add" data-say="stock of hdpe"><span class="plus" aria-hidden="true">+</span>Check another stock item. Ask about steel strip, HDPE, heater band or label rolls.</button>
         </section>
 
-        <section class="card dash" aria-labelledby="dash-h">
-          <h2 id="dash-h">Shift dashboard</h2>
-          <div id="shift" class="panel" data-state="loading"><p class="muted">Loading shift output...</p></div>
-          <section id="notes-card" aria-labelledby="notes-h">
-            <h3 id="notes-h">Handover notes</h3>
+        <div class="split">
+          <section class="card chat" id="chat-card" aria-labelledby="chat-h">
+            <h2 id="chat-h">Chat</h2>
+            <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
+          </section>
+
+          <section class="card trace" id="trace-card" aria-labelledby="trace-h">
+            <h2 id="trace-h">Live MCP trace</h2>
+            <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
+            <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
+          </section>
+        </div>
+
+        <div class="trio">
+          <section class="card" id="notes-card" aria-labelledby="notes-h">
+            <h2 id="notes-h">Handover notes</h2>
             <div id="notes" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
           </section>
-          <section id="followups-card" aria-labelledby="followups-h">
-            <h3 id="followups-h">Open follow-ups</h3>
+          <section class="card" id="followups-card" aria-labelledby="followups-h">
+            <h2 id="followups-h">Open follow-ups</h2>
             <div id="followups" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
           </section>
-          <section id="container-card" aria-labelledby="container-h">
-            <h3 id="container-h">Container load</h3>
+          <section class="card" id="container-card" aria-labelledby="container-h">
+            <h2 id="container-h">Container load</h2>
             <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
           </section>
-        </section>
+        </div>
       </main>
 
       <footer class="voice-strip" id="voice-strip" data-state="idle" role="status" aria-live="polite">

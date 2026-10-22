@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { summarize } from '../web/src/format.js'
+import { statusOf, summarize } from '../web/src/format.js'
 import { plan } from '../web/src/planner.js'
 
 const call = (text: string) => {
@@ -55,5 +55,11 @@ describe('summaries', () => {
     })
     expect(text).toContain('Order 2500 kg')
     expect(text).toContain('9 days')
+  })
+})
+
+describe('statusOf', () => {
+  it('matches the server thresholds at the boundaries', () => {
+    expect([100, 95, 94.9, 80, 79.9, 0].map(statusOf)).toEqual(['on_track', 'on_track', 'at_risk', 'at_risk', 'behind', 'behind'])
   })
 })
