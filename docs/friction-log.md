@@ -42,7 +42,7 @@ Real observations from building LineLedger. Each entry: task, steps, expected vs
 
 - Task: unit-test the "model must be Ollama" guard without a model server.
 - Steps: `Agent(model=..., tools=[MCPClient(url=...)])` raised `Failed to load tool ... Failed to start MCP client` because the MCP server was not running.
-- Workaround: the guard test starts the real MCP server (in-memory SQLite) first. This also proves the Strands MCP client discovers all eight tools over Streamable HTTP.
+- Workaround: the guard test starts the real MCP server (in-memory SQLite) first. The test asserts that the Strands MCP client discovers three of the tools (`get_shift_summary`, `check_stock`, `plan_container_load`) over Streamable HTTP.
 - Suggestion: lazy MCP start until the first call, or a documented offline mode for construction.
 
 ## 8. Deprecated import in the older Strands/MCP docs path

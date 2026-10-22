@@ -277,15 +277,26 @@ export function registerTools(server: McpServer, db: Db): void {
   )
 
   const positive = z.number().positive().finite()
+  const CONTAINERS = {
+    '20ft': { length: 5898, width: 2352, height: 2393, maxPayloadKg: 28200 },
+    '40ft': { length: 12032, width: 2352, height: 2393, maxPayloadKg: 26700 },
+  }
   server.registerTool(
     'plan_container_load',
     {
       title: 'Container load plan',
       description:
-        'How many identical boxes fit in a container, limited by geometry and payload. Uses the standalone container-load-planner package. Dimensions in mm, weights in kg.',
+        'How many identical boxes fit in a container, limited by geometry and payload. Uses the standalone container-load-planner package. ' +
+        'Simple form: container_type "20ft" or "40ft" plus box_length_mm, box_width_mm, box_height_mm and box_weight_kg. ' +
+        'Advanced form: container {length, width, height, maxPayloadKg} and item {length, width, height, weightKg}, in mm and kg.',
       inputSchema: {
-        container: z.object({ length: positive, width: positive, height: positive, maxPayloadKg: positive }),
-        item: z.object({ length: positive, width: positive, height: positive, weightKg: positive }),
+        container_type: z.enum(['20ft', '40ft']).optional().describe('Standard container, used when container is not given'),
+        box_length_mm: positive.optional(),
+        box_width_mm: positive.optional(),
+        box_height_mm: positive.optional(),
+        box_weight_kg: positive.optional(),
+        container: z.object({ length: positive, width: positive, height: positive, maxPayloadKg: positive }).optional(),
+        item: z.object({ length: positive, width: positive, height: positive, weightKg: positive }).optional(),
         rotation: z.enum(['upright', 'any']).default('upright'),
       },
       outputSchema: {
@@ -301,9 +312,17 @@ export function registerTools(server: McpServer, db: Db): void {
       },
       annotations: READ,
     },
-    (input) => {
+    ({ container_type, box_length_mm, box_width_mm, box_height_mm, box_weight_kg, container, item, rotation }) => {
+      const box =
+        item ??
+        (box_length_mm && box_width_mm && box_height_mm && box_weight_kg
+          ? { length: box_length_mm, width: box_width_mm, height: box_height_mm, weightKg: box_weight_kg }
+          : undefined)
+      const where = container ?? (container_type ? CONTAINERS[container_type] : undefined)
+      if (!box) return fail('Give the box size and weight: box_length_mm, box_width_mm, box_height_mm and box_weight_kg.')
+      if (!where) return fail('Give the container: container_type "20ft" or "40ft".')
       try {
-        return ok({ ...planContainerLoad(input) })
+        return ok({ ...planContainerLoad({ container: where, item: box, rotation }) })
       } catch (error) {
         return fail(error instanceof Error ? error.message : 'Container load calculation failed.')
       }

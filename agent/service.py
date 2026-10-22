@@ -17,13 +17,16 @@ from strands.tools.mcp import MCPClient  # noqa: E402
 
 OLLAMA_HOST = require_loopback(os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434"))
 MCP_URL = require_loopback(os.environ.get("LINELEDGER_MCP_URL", "http://127.0.0.1:8787/mcp"))
-MODEL_ID = os.environ.get("LINELEDGER_MODEL", "qwen3:4b")
+MODEL_ID = os.environ.get("LINELEDGER_MODEL", "qwen3:4b-instruct")
 PORT = int(os.environ.get("AGENT_PORT", "8788"))
 
 SYSTEM_PROMPT = (
     "You are LineLedger, a factory-floor assistant for a plant manager or line operator. "
     "All data is synthetic demo data. Use the provided tools for every fact about shift output, "
     "handover notes, follow-ups, stock and container loads; never invent numbers. "
+    "Rules for tool arguments: omit optional arguments the user did not state. Never pass shift_date or shift to get_shift_summary; call it with no arguments. "
+    "Use the author \"Operator\" for a handover note when the user names no author. "
+    "State only what the tool result says; do not add names or details. "
     "Answer in one or two short sentences suitable for speech."
 )
 
