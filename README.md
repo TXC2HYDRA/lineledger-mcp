@@ -104,9 +104,11 @@ browser (web/)  --same-origin proxy-->  MCP server (server/)  -->  SQLite (node:
 
 ## Optional: local-model agent
 
-Status: **the code and its guard tests exist; the model itself has not been run yet.** Tool-call
-reliability and latency with a local model are unverified, so the web client defaults to the
-rule-based planner.
+Status: **works, but not reliable enough to be the default.** With `qwen3:4b-instruct` on CPU only, a
+10-prompt spike picked a correct tool for every prompt that needs one, answered in about 3 to 17 s per
+turn (36 s for the first call, which loads the model), and made argument or reasoning mistakes on 3 of 10
+prompts. Details and the graded table are in `docs/spike-results.md`. The web client therefore defaults to
+the rule-based planner.
 
 ```bash
 python3 -m venv .venv && .venv/bin/python -m pip install -r agent/requirements.txt

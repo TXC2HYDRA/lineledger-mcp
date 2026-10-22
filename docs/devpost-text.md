@@ -42,7 +42,7 @@ The server, database and web app run on one machine and use no paid service or c
 6. A trace tap on the server records each JSON-RPC message in and out. The UI reads it from `/api/trace` and `/api/trace/stream` and shows it in the trace panel.
 7. The result is shown in the chat and the dashboard, and can be read aloud with browser speech synthesis.
 
-Optional local-model agent (not yet verified): the repository also contains a small Python service (`agent/`) built on the Strands Agents SDK with a local Ollama model (`qwen3:4b`). The web app has a switch for choosing it instead of the rule-based planner. The service has guards so it cannot fall back to a cloud model: an explicit Ollama model, a scrubbed AWS environment, a loopback-only host, and a startup assertion with tests. The model itself has not been run. Ollama is not installed on the build machine, so tool-calling quality and latency are unknown. Treat this part as unverified; the rule-based planner is the tested path.
+Optional local-model agent: the repository also contains a small Python service (`agent/`) built on the Strands Agents SDK with a local Ollama model (`qwen3:4b-instruct`). The web app has a switch for choosing it instead of the rule-based planner. The service has guards so it cannot fall back to a cloud model: an explicit Ollama model, a scrubbed AWS environment, a loopback-only host, and a startup assertion with tests. In a 10-prompt spike on a CPU-only laptop, the model chose a suitable tool for each prompt that needed one and answered in about 3 to 17 s per turn after the first call, but 3 of 10 prompts had wrong or invented arguments or a misleading reply. Treat this part as an experiment; the rule-based planner is the tested path.
 
 ## Tracks and mini challenges
 
@@ -54,7 +54,7 @@ Optional local-model agent (not yet verified): the repository also contains a sm
 - Contribution URL: https://github.com/TXC2HYDRA/container-load-planner
 - Project repository URL: https://github.com/TXC2HYDRA/lineledger-mcp
 
-**[ONLY IF SPIKE PASSES - otherwise delete]** AWS Builder mini challenge. The agent service in `agent/` uses the Strands Agents SDK with a local Ollama model and calls the LineLedger MCP server over Streamable HTTP. In the model spike on [DATE], [MODEL] [completed / did not complete] [N] tool calls through the agent, with [latency measured on this machine]. No AWS service is used or called anywhere in the project, and the agent is configured so it cannot reach one. [Fill in only measured results from the spike run, and delete this whole paragraph if the spike was not run or did not pass.]
+**[AUTHOR TO CONFIRM that the challenge rules accept a local-only entry; otherwise delete]** AWS Builder mini challenge. The agent service in `agent/` uses the Strands Agents SDK with a local Ollama model (`qwen3:4b-instruct`) and calls the LineLedger MCP server over Streamable HTTP. In the model spike on 2026-10-22, 7 of 10 prompts were handled correctly, 1 had correct tool results but a misleading spoken sentence, and 2 failed (an invented shift date, and one missing tool call). Mean latency was 12.9 s per turn on a CPU-only laptop. No AWS service is used or called anywhere in the project, and the agent is configured so it cannot reach one (scrubbed AWS environment, explicit Ollama model, loopback-only hosts, startup assertion). Graded results are in `docs/spike-results.md`.
 
 ## Data disclosure and limits
 
@@ -103,7 +103,7 @@ Would we build this again, and why: [AUTHOR TO CONFIRM] Suggested draft: "Yes, f
 - [ ] [VERIFY] https://github.com/TXC2HYDRA/lineledger-mcp is public, and the submission branch (`hydra-build/app`, or main after merging) holds the code you are submitting.
 - [ ] [VERIFY] GitHub shows an MIT license for both repositories (check the license badge in the repository sidebar).
 - [ ] [VERIFY] Form values: GitHub username `TXC2HYDRA`; contribution URL `https://github.com/TXC2HYDRA/container-load-planner`; project repository URL `https://github.com/TXC2HYDRA/lineledger-mcp`.
-- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (18 tests, 3 agent tests).
+- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (19 tests, 3 agent tests).
 - [ ] [VERIFY] The Alexa+ track and the Open Source mini challenge are selected on Devpost; the AWS Builder challenge is selected only if the spike passed and its paragraph is filled with measured results.
 - [ ] [AUTHOR TO CONFIRM] The "would we build this again" answer is in your own words.
 - [ ] Submit before 2026-10-23 12:00 PM PT.
