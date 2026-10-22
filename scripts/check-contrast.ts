@@ -60,6 +60,13 @@ for (const [name, { vars, pct }] of Object.entries(themes)) {
     surfaces[`drawer + lift (over ${label})`] = over(vars['lift-color']!, pct['lift-pct']!, drawer)
   }
 
+  // smooth backdrop colours (when a theme defines them): text on the page itself and under glass over it
+  for (const k of ['mesh-a', 'mesh-b', 'mesh-c']) {
+    if (!vars[k]) continue
+    surfaces[k] = vars[k]!
+    surfaces[`glass + sheen + lift (over ${k})`] = over(vars['lift-color']!, pct['lift-pct']!, over(vars['sheen-color']!, pct['sheen-pct']!, over(vars['color-surface']!, pct['glass-pct']!, vars[k]!)))
+  }
+
   const text = ['color-text', 'color-text-muted', 'color-accent', 'color-success', 'color-warning', 'color-danger']
   const entries = Object.entries(surfaces)
   const pairs: Pair[] = [
