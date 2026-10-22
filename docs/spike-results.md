@@ -33,18 +33,39 @@ the reply content, ending in `</think>`.
 Only 3 prompts were run in this configuration. The other 7 prompts were not run, so create, list and
 close tools, and the off-topic case, are NOT TESTED with a working configuration.
 
+## Run 3: `qwen3:4b-instruct` (ID `0edcdef34593`, 2.5 GB), committed settings, 10 prompts, idle model
+
+Same service as run 1 (`max_tokens=512`), model swapped by `LINELEDGER_MODEL`. The first model was deleted
+before this pull. No reasoning text leaked into any reply. The model used 3.9 GB of RAM, 100% CPU.
+The script's automatic check only compares the tool name (10 of 10, average 12.3 s). Graded by hand against
+the arguments and the reply:
+
+| # | Prompt | Time | Verdict |
+|---|---|---|---|
+| 1 | shift summary | 36.1 s (includes model load) | Correct |
+| 2 | How is line 2 doing this shift? | 7.0 s | **Wrong.** The model invented `shift_date: 2023-10-25, shift: A`, so the tool returned nothing for line 2 and the reply said "no output" |
+| 3 | add handover note, line 2 | 9.1 s | Partly wrong. Text and line are right, but it invented the author "Asha (shift A)"; the tool requires an author and the user gave none |
+| 4 | show handover notes | 13.3 s | Correct |
+| 5 | add follow-up (title, owner, due, line) | 11.9 s | Correct |
+| 6 | list open follow-ups | 12.8 s | Correct |
+| 7 | close follow-up 1 | 7.0 s | Correct action; the reply adds an unsupported detail ("Ravi completed the check") |
+| 8 | stock of HDPE | 7.3 s | Correct |
+| 9 | 600x400x300 12kg boxes in a 20ft container | 16.0 s | **Failed.** Arguments did not match the tool schema (`depth`/`weight` instead of `length`/`weightKg`, no `maxPayloadKg`), so there was no answer; the model asked the user for dimensions |
+| 10 | weather in Pune (no tool) | 2.6 s | Correct: declined, no tool call |
+
+Strict tally: 7 correct, 1 partly wrong, 2 failed. Median 10.5 s, mean 12.3 s per turn on CPU only.
+One run of 10 prompts at temperature 0 on one machine: this shows the approach works, not that it is reliable.
+
 ## What this means
 
 - Strands + Ollama + the LineLedger MCP server connect and the model can pick the right tool with the
   right arguments (2 of 3 prompts in run 2).
-- On this CPU, `qwen3:4b` takes about 1 to 6 minutes per turn. That is far too slow for a voice
-  assistant, and tool-call reliability is not established.
+- `qwen3:4b` (thinking) takes about 1 to 6 minutes per turn on this CPU and fails at the committed token cap.
+  `qwen3:4b-instruct` answers in about 3 to 16 s warm, and chose a correct tool for 10 of 10 prompts,
+  but 3 of 10 had wrong or invented arguments. That is usable for a demo, not a reliable product.
+- Known fixes not yet applied or re-tested: tell the model in the system prompt to omit shift arguments
+  and to use "Operator" as the author when none is given; give the container tool presets or an example
+  so it fills `length`, `width`, `height` and `maxPayloadKg` correctly.
 - The rule-based planner remains the default and is the demo path. The model is an optional extra.
-- Nothing in `agent/` was changed after the spike. `max_tokens=512` in `agent/service.py` makes every
-  request fail with this model tag, so it needs a fix before the agent can be demonstrated.
-
-## Candidate next step
-
-Try `qwen3:4b-instruct` (the non-thinking 2507 variant, about 2.5 GB, not yet downloaded). It should answer
-without a reasoning block, so the 512-token cap and the latency should be much better. This needs a
-separate download approval and a fresh 10-prompt run.
+- The only code change after the spike is the default model in `agent/service.py`, now `qwen3:4b-instruct`.
+  `max_tokens=512` is enough for this model.

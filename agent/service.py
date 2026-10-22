@@ -17,7 +17,7 @@ from strands.tools.mcp import MCPClient  # noqa: E402
 
 OLLAMA_HOST = require_loopback(os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434"))
 MCP_URL = require_loopback(os.environ.get("LINELEDGER_MCP_URL", "http://127.0.0.1:8787/mcp"))
-MODEL_ID = os.environ.get("LINELEDGER_MODEL", "qwen3:4b")
+MODEL_ID = os.environ.get("LINELEDGER_MODEL", "qwen3:4b-instruct")
 PORT = int(os.environ.get("AGENT_PORT", "8788"))
 
 SYSTEM_PROMPT = (

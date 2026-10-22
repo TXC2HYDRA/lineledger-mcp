@@ -117,7 +117,7 @@ Running the agent needs a local Ollama server (not installed by this repository)
 `docs/download-approval-manifest.md` for the no-sudo steps. Then:
 
 ```bash
-npm run dev:agent        # http://127.0.0.1:8788, model qwen3:4b
+npm run dev:agent        # http://127.0.0.1:8788, model qwen3:4b-instruct
 ```
 
 and press "Planner: local model" in the web client.
