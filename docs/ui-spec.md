@@ -6,11 +6,12 @@ Voice-first factory-floor co-pilot. Synthetic demo data only.
 
 - Primary style: **dark dashboard with a left sidebar** (Vaulto-style reference). Sidebar navigation, a top command bar, a hero metric, then independent cards.
 - Secondary style: **Swiss Design**. One sans-serif family, strong alignment, clear hierarchy, consistent numerals.
-- Palette: neutral near-black surfaces, one orange accent (`#FF5A1F`). Red (`--color-danger`) means "behind", never decoration.
-- Cards are **solid surfaces**. No blur, no transparency on cards or text.
-- One decorative exception to the old "no gradients" rule: a static radial glow on the page background, behind the cards. It carries no text and no state.
+- Palette: neutral near-black surfaces, one orange accent (`#FF6A2B`). Red (`--color-danger`) means "behind", never decoration.
+- Surfaces are **glass** (glassmorphism): translucent fills with `backdrop-filter: blur`, a light edge and a soft shadow, over a static page background of orange glows and two hard-edged discs (the discs are what makes the blur visible). The background carries no text and no state.
+- Glass is only allowed because contrast is checked against the worst case: `npm run check:contrast` composites every glass fill over the strongest backdrop before testing text and boundaries. Text that sits directly on the page background is checked against the glow peak too.
+- Fallback: with no `backdrop-filter` support, or with `prefers-reduced-transparency: reduce`, the glass tokens switch to the solid surface tokens.
 - Deliberate departures from the reference, kept for accessibility: text is 14 px or larger, every text pair passes WCAG AA, labels on orange use the dark `--color-bg` (white on orange fails 4.5:1).
-- Rejected: Glassmorphism (blur makes contrast fragile), Neumorphism (low-contrast boundaries hide focus), Cyberpunk (neon undermines business credibility).
+- Rejected: Neumorphism (low-contrast boundaries hide focus), Cyberpunk (neon undermines business credibility). Glassmorphism was rejected first and adopted in phase 7 once the contrast check could cover translucent surfaces.
 
 ## Design tokens
 
@@ -22,10 +23,12 @@ Source of truth is the `:root` block in `web/src/style.css`. `npm run check:cont
 | `--color-surface` | `#121214` | cards, sidebar |
 | `--color-surface-raised` | `#1B1B1F` | rows, inputs, nested panels |
 | `--color-border` | `#2A2A30` | decorative card edges only |
-| `--color-border-strong` | `#6B6B76` | control boundaries (inputs, buttons) |
+| `--color-border-strong` | `#85858F` | control boundaries (inputs, buttons) |
 | `--color-text` / `--color-text-muted` | `#F5F5F6` / `#A8A8B3` | text |
-| `--color-accent` / `--color-focus` | `#FF5A1F` | primary action, focus ring, selected state |
-| `--color-success` / `--color-warning` / `--color-danger` | `#34D399` / `#FBBF24` / `#FF6B6B` | on track / at risk / behind |
+| `--color-accent` / `--color-focus` | `#FF6A2B` | primary action, focus ring, selected state |
+| `--color-success` / `--color-warning` / `--color-danger` | `#34D399` / `#FBBF24` / `#FF7A7A` | on track / at risk / behind |
+
+Glass tokens (percentages are fill opacity, so the check script can read them): `--glow-pct` 28% (strongest page glow), `--glass-pct` 55% (cards, sidebar), `--sheen-pct` 3% (diagonal highlight), `--lift-pct` 5% (controls and rows on glass), `--pill-pct` 85% (voice pill), `--drawer-pct` 90% (trace drawer), `--glass-blur` 18px.
 
 Type scale: 14 (minimum) / 18 body / 24 section / 32 metric / 56 hero. Spacing 4-8-12-16-24-32-48. Radius 12 control, 16 card, 20 panel. Motion 120 to 180 ms.
 
@@ -43,18 +46,29 @@ Type scale: 14 (minimum) / 18 body / 24 section / 32 metric / 56 hero. Spacing 4
 
 ### Contrast (WCAG 2.x, computed by `npm run check:contrast`)
 
+Solid surfaces (kept for the fallback):
+
 | Foreground | on bg | on surface | on raised |
 |---|---|---|---|
 | text | 18.16 | 17.17 | 15.76 |
 | text-muted | 8.40 | 7.94 | 7.29 |
-| accent | 6.35 | 6.00 | 5.51 |
+| accent | 6.92 | 6.55 | 6.01 |
 | success | 10.29 | 9.73 | 8.93 |
 | warning | 11.85 | 11.21 | 10.28 |
-| danger | 7.13 | 6.74 | 6.19 |
+| danger | 7.84 | 7.41 | 6.80 |
 
-Dark label (`--color-bg`) on accent fill: 6.35. All text pairs pass the 4.5:1 AA minimum.
+Translucent surfaces, worst case. "Page glow" is text placed directly on the page at its strongest glow (hero text, labels). "Glass" is the card fill over that glow. "Glass + sheen + lift" is a control or row sitting on a card. "Pill" and "drawer" are composited over a full-strength accent, because they can float over bright content:
 
-Non-text boundaries (WCAG 1.4.11 needs 3:1): `--color-border-strong` is 3.76 on bg, 3.55 on surface, 3.26 on raised. `--color-border` is decorative only. Focus ring `--color-focus` is 5.51 or better.
+| Foreground | page glow | glass | glass + sheen + lift | pill | drawer + lift |
+|---|---|---|---|---|---|
+| text | 11.99 | 15.08 | 12.03 | 14.12 | 13.28 |
+| text-muted | 5.55 | 6.97 | 5.57 | 6.53 | 6.14 |
+| accent | 4.57 | 5.75 | 4.59 | 5.38 | 5.06 |
+| success | 6.80 | 8.54 | 6.82 | 8.00 | 7.52 |
+| warning | 7.83 | 9.84 | 7.85 | 9.21 | 8.67 |
+| danger | 5.17 | 6.51 | 5.19 | 6.09 | 5.73 |
+
+Dark label (`--color-bg`) on accent fill: 6.9 or better. All 81 pairs pass: text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
 
 There is no light theme. Add one only after the dark theme is stable.
 
@@ -83,7 +97,7 @@ Left sidebar plus a scrolling content column. Desktop (1500 px and wider) puts t
 - The MCP trace is a right-edge drawer (native `<dialog>`). Escape or a backdrop click closes it.
 - Below 1100 px the sidebar becomes a top block (brand, nav row, synthetic-data card) and every row stacks to one column. The composer and the voice pill stay on screen.
 - At 1920x1080 the hero, line cards, chat, chart and data cards are visible without scrolling in the empty states. A populated container-load result makes the bottom row taller, so the column scrolls a little. The bottom 96 px of the column is reserved for the voice pill.
-- No remote images, no blur, no heavy animation.
+- No remote images, no heavy animation. Blur is limited to `backdrop-filter` on the glass surfaces (and a 4px blur on the drawer backdrop).
 
 ## Voice states
 
