@@ -15,6 +15,17 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, 
   return node
 }
 
+const SVG = 'http://www.w3.org/2000/svg'
+function icon(name: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG, 'svg')
+  svg.setAttribute('class', 'ico')
+  svg.setAttribute('aria-hidden', 'true')
+  const use = document.createElementNS(SVG, 'use')
+  use.setAttribute('href', `#i-${name}`)
+  svg.append(use)
+  return svg
+}
+
 const mcp = new McpConnection()
 
 // ---- connection + voice state ---------------------------------------------------------------
@@ -56,6 +67,36 @@ async function data(name: string, args: Record<string, unknown> = {}): Promise<D
   return r.structuredContent ?? {}
 }
 
+// Two small vertical-bar charts built from the shift summary. Bars are scaled in CSS; every value is also printed.
+function renderBars(lines: Data[]) {
+  const group = (title: string, value: (l: Data) => number, max: number, label: (l: Data) => string, worst: Data) =>
+    h(
+      'div',
+      { class: 'bar-group' },
+      h('h3', {}, title),
+      h(
+        'div',
+        { class: 'bar-cols' },
+        ...lines.map((l) =>
+          h(
+            'div',
+            { class: 'bar-col', 'data-worst': String(l === worst) },
+            h('span', { class: 'bar-val' }, label(l)),
+            h('div', { class: 'bar-track', role: 'img', 'aria-label': `${l.name}: ${label(l)}` }, h('span', { style: `height:${Math.max(2, Math.min(100, (value(l) / max) * 100))}%` })),
+            h('span', { class: 'muted' }, l.name),
+          ),
+        ),
+      ),
+    )
+  const by = (f: (l: Data) => number, pick: (a: number, b: number) => number) => lines.reduce((a, l) => (pick(f(l), f(a)) === f(l) ? l : a))
+  const maxDown = Math.max(1, ...lines.map((l) => l.downtime_min))
+  $('bars').dataset.state = 'populated'
+  $('bars').replaceChildren(
+    group('Output, % of target', (l) => l.percent_of_target, 100, (l) => `${l.percent_of_target}%`, by((l) => l.percent_of_target, Math.min)),
+    group('Downtime, minutes', (l) => l.downtime_min, maxDown, (l) => `${l.downtime_min} min`, by((l) => l.downtime_min, Math.max)),
+  )
+}
+
 function setStatus(el: HTMLElement, status: Status) {
   el.dataset.status = status
   el.textContent = STATUS_LABEL[status]
@@ -71,6 +112,7 @@ async function refreshShift() {
     $('hero-metric').textContent = `${d.totals.percent_of_target}%`
     setStatus($('hero-status'), status)
     $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
+    renderBars(lines)
     panel(
       'shift',
       'populated',
@@ -90,15 +132,20 @@ async function refreshShift() {
     )
   } catch (e) {
     $('hero-sub').textContent = 'Shift output unavailable.'
+    $('bars').dataset.state = 'error'
+    $('bars').replaceChildren(muted('Shift output unavailable.'))
     panel('shift', 'error', `Could not load shift output: ${errorText(e)}`)
   }
 }
+
+const row = (iconName: string, main: (Node | string)[], aside?: Node) =>
+  h('li', { class: 'row' }, h('span', { class: 'avatar' }, icon(iconName)), h('div', { class: 'row-main' }, ...main), ...(aside ? [aside] : []))
 
 async function refreshNotes() {
   try {
     const { notes } = await data('list_handover_notes', { limit: 5 })
     if (!notes.length) return panel('notes', 'empty', muted('No handover notes yet.'))
-    panel('notes', 'populated', h('ul', {}, ...(notes as Data[]).map((n) => h('li', {}, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`), h('br'), n.text))))
+    panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`)]))))
   } catch (e) {
     panel('notes', 'error', `Could not load notes: ${errorText(e)}`)
   }
@@ -107,17 +154,18 @@ async function refreshNotes() {
 async function refreshFollowUps() {
   try {
     const { follow_ups } = await data('list_follow_ups', { status: 'open' })
+    $('followup-count').textContent = String(follow_ups.length)
     if (!follow_ups.length) return panel('followups', 'empty', muted('No open follow-ups.'))
     panel(
       'followups',
       'populated',
       h(
         'ul',
-        {},
+        { class: 'rows' },
         ...(follow_ups as Data[]).map((f) => {
           const close = h('button', { type: 'button', 'aria-label': `Close follow-up ${f.id}: ${f.title}` }, 'Close')
           close.addEventListener('click', () => void send(`close follow-up ${f.id}`, false))
-          return h('li', { class: 'followup' }, h('span', {}, `#${f.id} ${f.title}`, h('br'), h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)), close)
+          return row('list', [`#${f.id} ${f.title}`, h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)], close)
         }),
       ),
     )
@@ -127,20 +175,27 @@ async function refreshFollowUps() {
 }
 
 function showContainer(d: Data) {
-  const row = (k: string, v: string) => h('li', {}, h('span', { class: 'muted' }, `${k}: `), v)
+  const kv = (k: string, v: string) => h('li', {}, h('span', { class: 'muted' }, `${k}: `), v)
+  const meter = (label: string, fraction: number, detail: string) =>
+    h(
+      'div',
+      { class: 'meter' },
+      h('div', { class: 'meter-head' }, h('span', { class: 'muted' }, label), h('strong', {}, detail)),
+      h('div', { class: 'bar', role: 'img', 'aria-label': `${label}: ${detail}` }, h('span', { 'data-status': 'accent', style: `width:${Math.min(100, fraction * 100)}%` })),
+    )
+  // One layer, drawn from the grid: along x across cells (capped so a big result stays readable).
+  const cols = Math.min(d.grid.across, 24)
+  const rowsN = Math.min(d.grid.along, 24)
+  const layer = h('div', { class: 'layer', role: 'img', 'aria-label': `One layer: ${d.grid.along} by ${d.grid.across} boxes, ${d.grid.layers} layers high`, style: `grid-template-columns:repeat(${cols},1fr)` }, ...Array.from({ length: cols * rowsN }, () => h('span')))
   panel(
     'container',
     'populated',
     h('p', { class: 'metric' }, `${d.count} boxes`),
-    h(
-      'ul',
-      {},
-      row('Limited by', d.limitedBy),
-      row('Grid', `${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers`),
-      row('Placed as (mm)', `${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height}`),
-      row('Volume used', `${Math.round(d.volumeUtilisation * 100)}%`),
-      row('Payload used', `${Math.round(d.payloadUtilisation * 100)}% (${d.totalWeightKg} kg)`),
-    ),
+    h('p', { class: 'muted' }, `Limited by ${d.limitedBy} · ${d.grid.layers} layers`),
+    layer,
+    meter('Volume used', d.volumeUtilisation, `${Math.round(d.volumeUtilisation * 100)}%`),
+    meter('Payload used', d.payloadUtilisation, `${Math.round(d.payloadUtilisation * 100)}% (${d.totalWeightKg} kg)`),
+    h('ul', {}, kv('Grid', `${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers`), kv('Placed as (mm)', `${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height}`)),
   )
 }
 
