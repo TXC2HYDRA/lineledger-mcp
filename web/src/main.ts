@@ -49,7 +49,7 @@ function setVoice(state: VoiceState, detail: string) {
 function addMessage(who: 'You' | 'LineLedger', text: string, kind: 'user' | 'assistant' | 'error' = 'assistant') {
   const li = h('li', { class: `msg ${kind}` }, h('span', { class: 'who' }, who), text)
   $('transcript').append(li)
-  li.scrollIntoView({ block: 'end' })
+  li.parentElement!.scrollTop = li.parentElement!.scrollHeight // scroll the transcript only, never the page
 }
 
 // ---- dashboard ------------------------------------------------------------------------------
@@ -143,7 +143,7 @@ const row = (iconName: string, main: (Node | string)[], aside?: Node) =>
 
 async function refreshNotes() {
   try {
-    const { notes } = await data('list_handover_notes', { limit: 5 })
+    const { notes } = await data('list_handover_notes', { limit: 2 })
     if (!notes.length) return panel('notes', 'empty', muted('No handover notes yet.'))
     panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`)]))))
   } catch (e) {
@@ -175,7 +175,6 @@ async function refreshFollowUps() {
 }
 
 function showContainer(d: Data) {
-  const kv = (k: string, v: string) => h('li', {}, h('span', { class: 'muted' }, `${k}: `), v)
   const meter = (label: string, fraction: number, detail: string) =>
     h(
       'div',
@@ -191,11 +190,9 @@ function showContainer(d: Data) {
     'container',
     'populated',
     h('p', { class: 'metric' }, `${d.count} boxes`),
-    h('p', { class: 'muted' }, `Limited by ${d.limitedBy} · ${d.grid.layers} layers`),
+    h('p', { class: 'muted' }, `Limited by ${d.limitedBy} · ${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers · placed ${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height} mm`),
     layer,
-    meter('Volume used', d.volumeUtilisation, `${Math.round(d.volumeUtilisation * 100)}%`),
-    meter('Payload used', d.payloadUtilisation, `${Math.round(d.payloadUtilisation * 100)}% (${d.totalWeightKg} kg)`),
-    h('ul', {}, kv('Grid', `${d.grid.along} × ${d.grid.across} × ${d.grid.layers} layers`), kv('Placed as (mm)', `${d.orientation.length} × ${d.orientation.width} × ${d.orientation.height}`)),
+    h('div', { class: 'meters' }, meter('Volume', d.volumeUtilisation, `${Math.round(d.volumeUtilisation * 100)}%`), meter('Payload', d.payloadUtilisation, `${Math.round(d.payloadUtilisation * 100)}% · ${d.totalWeightKg} kg`)),
   )
 }
 
@@ -284,7 +281,7 @@ function traceLabel(e: Data): string {
   const tool = m.method === 'tools/call' ? ` ${m.params?.name}` : ''
   return `${e.dir === 'in' ? '→ request' : '← response'} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
 }
-const PULSE_CELLS = 49
+const PULSE_CELLS = 42
 const pulse: ('in' | 'out' | 'err')[] = []
 let traceCount = 0
 function drawPulse() {
@@ -299,7 +296,7 @@ function startTrace() {
     const e = JSON.parse(ev.data) as Data
     list.append(h('li', {}, h('details', {}, h('summary', {}, h('span', { class: `dir ${e.dir}` }, traceLabel(e))), h('pre', {}, JSON.stringify(e.message, null, 2)))))
     while (list.children.length > 200) list.firstElementChild!.remove()
-    list.lastElementChild!.scrollIntoView({ block: 'end' })
+    list.scrollTop = list.scrollHeight
     pulse.push(e.message?.error ? 'err' : e.dir)
     if (pulse.length > PULSE_CELLS) pulse.shift()
     traceCount++
@@ -310,7 +307,7 @@ function startTrace() {
 const traceDialog = $('trace-dialog') as HTMLDialogElement
 function openTrace() {
   traceDialog.showModal()
-  $('trace-list').lastElementChild?.scrollIntoView({ block: 'end' })
+  $('trace-list').scrollTop = $('trace-list').scrollHeight
 }
 $('trace-card').addEventListener('click', openTrace)
 $('open-trace').addEventListener('click', (ev) => {
@@ -363,6 +360,22 @@ $('stop-speech').addEventListener('click', () => {
   stopSpeaking()
   setVoice('idle', 'Speech stopped.')
 })
+// "/" or Ctrl/Cmd+K focuses the command bar (unless already typing somewhere).
+document.addEventListener('keydown', (ev) => {
+  const typing = ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement
+  if ((ev.key === '/' && !typing) || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) {
+    ev.preventDefault()
+    input.focus()
+  }
+})
+// Sidebar: the clicked section becomes the current page; the trace item opens the drawer instead.
+document.querySelectorAll<HTMLAnchorElement>('.nav a').forEach((a) =>
+  a.addEventListener('click', () => {
+    if (a.id === 'open-trace') return
+    document.querySelectorAll('.nav a').forEach((o) => o.removeAttribute('aria-current'))
+    a.setAttribute('aria-current', 'page')
+  }),
+)
 document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Escape') return
   stopSpeaking()
