@@ -3,7 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
+  <script>
+    // Set the theme before first paint: saved choice, else the system preference.
+    try {
+      var saved = localStorage.getItem('theme')
+      document.documentElement.dataset.theme = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+    } catch (e) {
+      document.documentElement.dataset.theme = 'dark'
+    }
+  </script>
   <title>LineLedger</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
@@ -17,23 +28,24 @@
       <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></symbol>
       <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM5 11a7 7 0 0014 0M12 18v3" /></symbol>
       <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z" /></symbol>
+      <symbol id="i-theme" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 3v18" /><path d="M12 3a9 9 0 010 18z" fill="currentColor" /></symbol>
       <symbol id="i-stop" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></symbol>
     </defs>
   </svg>
 
   <div class="app">
     <aside class="sidebar" aria-label="Sidebar">
-      <a class="brand" href="#home">LineLedger<span class="sub">Factory-Floor Co-pilot</span></a>
+      <a class="brand" href="#/home">LineLedger<span class="sub">Factory-Floor Co-pilot</span></a>
       <nav class="nav" aria-label="Primary">
         <p class="nav-label">General</p>
-        <a href="#home" aria-current="page"><svg class="ico" aria-hidden="true"><use href="#i-home" /></svg>Home</a>
-        <a href="#chat-card"><svg class="ico" aria-hidden="true"><use href="#i-chat" /></svg>Assistant</a>
+        <a href="#/home" data-view="home"><svg class="ico" aria-hidden="true"><use href="#i-home" /></svg>Home</a>
+        <a href="#/assistant" data-view="assistant"><svg class="ico" aria-hidden="true"><use href="#i-chat" /></svg>Assistant</a>
         <p class="nav-label">Tools</p>
-        <a href="#followups-card"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Follow-ups<span class="count" id="followup-count">-</span></a>
-        <a href="#notes-card"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
-        <a href="#container-card"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
+        <a href="#/followups" data-view="followups"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Follow-ups<span class="count" id="followup-count">-</span></a>
+        <a href="#/handover" data-view="handover"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
+        <a href="#/container" data-view="container"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
         <p class="nav-label">Insights</p>
-        <a href="#trace-card" id="open-trace"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
+        <a href="#/trace" id="open-trace" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
       </nav>
       <div class="sidebar-foot">
         <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
@@ -41,9 +53,9 @@
       </div>
     </aside>
 
-    <div class="main" id="home">
+    <div class="main">
       <header class="topbar">
-        <p class="crumb"><span class="muted">Dashboard</span> / Home</p>
+        <p class="crumb"><span class="muted">Dashboard</span> / <span id="crumb-view">Home</span></p>
         <form id="composer" class="composer" autocomplete="off">
           <label for="text" class="sr-only">Type a request</label>
           <input id="text" name="text" type="text" placeholder="Type a request (press /)" maxlength="400" />
@@ -52,9 +64,10 @@
           <button type="button" id="stop-speech" disabled><svg class="ico" aria-hidden="true"><use href="#i-stop" /></svg>Stop speaking</button>
           <button type="button" id="mode" aria-pressed="false" title="Switch between the rule-based planner and the local model">Planner: rules (no LLM)</button>
         </form>
+        <button type="button" id="theme" class="icon-btn" aria-pressed="false" aria-label="Light theme" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-theme" /></svg></button>
       </header>
 
-      <main class="content">
+      <main class="content" id="content" data-view="home">
         <div class="top">
         <section class="hero" aria-labelledby="hero-h">
           <h2 id="hero-h" class="eyebrow">Plant output</h2>
@@ -79,6 +92,13 @@
           <section class="card chat" id="chat-card" aria-labelledby="chat-h">
             <h2 id="chat-h">Chat</h2>
             <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
+            <div class="suggest" data-only="assistant" hidden role="group" aria-label="Example requests">
+              <button type="button" data-say="shift summary">Shift summary</button>
+              <button type="button" data-say="open follow-ups">Open follow-ups</button>
+              <button type="button" data-say="add handover note for line 2: belt tension checked">Add handover note</button>
+              <button type="button" data-say="stock of heater band">Stock of heater band</button>
+              <button type="button" data-say="how many 600x400x300 12kg boxes fit in a 20ft container">Container load</button>
+            </div>
           </section>
 
           <section class="card" id="bars-card" aria-labelledby="bars-h">
@@ -94,15 +114,52 @@
 
         <div class="trio">
           <section class="card" id="followups-card" aria-labelledby="followups-h">
-            <h2 id="followups-h">Open follow-ups</h2>
+            <div class="card-head">
+              <h2 id="followups-h">Open follow-ups</h2>
+              <div class="seg" data-only="followups" hidden role="group" aria-label="Show follow-ups">
+                <button type="button" data-filter="open" aria-pressed="true">Open</button>
+                <button type="button" data-filter="closed" aria-pressed="false">Closed</button>
+                <button type="button" data-filter="all" aria-pressed="false">All</button>
+              </div>
+            </div>
+            <form id="followup-form" class="form" data-only="followups" hidden autocomplete="off">
+              <h3>Add a follow-up</h3>
+              <label>Task<input name="title" required maxlength="120" placeholder="Re-check the guard" /></label>
+              <label>Owner<input name="owner" required maxlength="60" placeholder="Ravi" /></label>
+              <label>Due date<input name="due_date" type="date" /></label>
+              <label>Line<select name="line_id"><option value="">Any line</option></select></label>
+              <button type="submit" class="primary">Add follow-up</button>
+              <p class="form-msg" role="status"></p>
+            </form>
             <div id="followups" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
           </section>
           <section class="card" id="notes-card" aria-labelledby="notes-h">
-            <h2 id="notes-h">Handover notes</h2>
+            <div class="card-head"><h2 id="notes-h">Handover notes</h2></div>
+            <form id="note-form" class="form" data-only="handover" hidden autocomplete="off">
+              <h3>Add a handover note</h3>
+              <label>Your name and shift<input name="author" required maxlength="60" placeholder="Asha (shift B)" /></label>
+              <label>Line<select name="line_id"><option value="">All lines</option></select></label>
+              <label>Note<textarea name="text" required maxlength="500" rows="4" placeholder="What does the next shift need to know?"></textarea></label>
+              <button type="submit" class="primary">Save note</button>
+              <p class="form-msg" role="status"></p>
+            </form>
             <div id="notes" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
           </section>
           <section class="card" id="container-card" aria-labelledby="container-h">
-            <h2 id="container-h">Container load</h2>
+            <div class="card-head"><h2 id="container-h">Container load</h2></div>
+            <form id="container-form" class="form" data-only="container" hidden autocomplete="off">
+              <h3>How many boxes fit?</h3>
+              <label>Container<select name="container_type"><option value="20ft">20 ft</option><option value="40ft">40 ft</option></select></label>
+              <div class="form-row">
+                <label>Length (mm)<input name="box_length_mm" type="number" min="1" step="any" required value="600" /></label>
+                <label>Width (mm)<input name="box_width_mm" type="number" min="1" step="any" required value="400" /></label>
+                <label>Height (mm)<input name="box_height_mm" type="number" min="1" step="any" required value="300" /></label>
+              </div>
+              <label>Box weight (kg)<input name="box_weight_kg" type="number" min="0.01" step="any" required value="12" /></label>
+              <label>Rotation<select name="rotation"><option value="upright">Upright only</option><option value="any">Any orientation</option></select></label>
+              <button type="submit" class="primary">Calculate</button>
+              <p class="form-msg" role="status"></p>
+            </form>
             <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
           </section>
           <button type="button" class="card tile" id="trace-card" aria-haspopup="dialog">
