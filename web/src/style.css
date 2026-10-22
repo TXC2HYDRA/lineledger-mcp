@@ -41,8 +41,6 @@
 
   /* Glass: translucent fills over the page glow. Percentages are the opacity of the fill.
      scripts/check-contrast.ts composites them over the worst-case backdrop, so keep them numeric. */
-  --blob-a: #222B42;          /* quiet slate-blue discs behind the glass */
-  --blob-b: #1C2230;
   --glass-pct: 55%;           /* cards, sidebar */
   --sheen-pct: 3%;            /* diagonal highlight across each glass card */
   --lift-pct: 5%;             /* white lift for controls and rows sitting on glass */
@@ -80,8 +78,6 @@
   --color-danger: #B42318;
   --color-focus: #B03A06;
 
-  --blob-a: #D6E0F2;          /* quiet slate-blue discs behind the glass */
-  --blob-b: #E3E8F0;
   --glass-pct: 48%;
   --pill-pct: 90%;
   --drawer-pct: 94%;
@@ -99,11 +95,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background:
-    /* two quiet hard-edged discs: the blur on glass is only visible where the backdrop has an edge */
-    radial-gradient(circle 170px at 66% 38%, var(--blob-a) 0 98%, transparent 100%),
-    radial-gradient(circle 130px at 24% 84%, var(--blob-b) 0 98%, transparent 100%),
-    var(--color-bg);
+  background: var(--color-bg);
   background-attachment: fixed;
   color: var(--color-text);
   font: 400 var(--text-body)/1.45 var(--font-sans);
