@@ -46,7 +46,7 @@
         <p class="crumb"><span class="muted">Dashboard</span> / Home</p>
         <form id="composer" class="composer" autocomplete="off">
           <label for="text" class="sr-only">Type a request</label>
-          <input id="text" name="text" type="text" placeholder="Type a request..." maxlength="400" />
+          <input id="text" name="text" type="text" placeholder="Type a request (press /)" maxlength="400" />
           <button type="submit" id="send"><svg class="ico" aria-hidden="true"><use href="#i-send" /></svg>Send</button>
           <button type="button" id="listen" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-mic" /></svg>Listen</button>
           <button type="button" id="stop-speech" disabled><svg class="ico" aria-hidden="true"><use href="#i-stop" /></svg>Stop speaking</button>
@@ -55,6 +55,7 @@
       </header>
 
       <main class="content">
+        <div class="top">
         <section class="hero" aria-labelledby="hero-h">
           <h2 id="hero-h" class="eyebrow">Plant output</h2>
           <p class="muted" id="hero-sub">Loading shift output...</p>
@@ -72,6 +73,7 @@
           <div id="shift" data-state="loading"><p class="muted">Loading shift output...</p></div>
           <button type="button" class="card add" data-say="stock of hdpe"><span class="plus" aria-hidden="true">+</span>Check another stock item. Ask about steel strip, HDPE, heater band or label rolls.</button>
         </section>
+        </div>
 
         <div class="split">
           <section class="card chat" id="chat-card" aria-labelledby="chat-h">
