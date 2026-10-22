@@ -146,7 +146,7 @@ h3 { font-size: var(--text-body); font-weight: 600; margin-top: var(--space-4); 
 .card.add:hover:not(:disabled) { background: var(--color-surface); color: var(--color-text); }
 .card.add .plus { display: inline-grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); font-size: var(--text-section); line-height: 1; color: var(--color-text); }
 
-.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-4); }
+.split { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--space-4); }
 .split > .card { height: 300px; overflow: hidden; }
 .trio { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 0.8fr); gap: var(--space-4); align-items: start; }
 
@@ -226,6 +226,22 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 .bar-track > span { display: block; width: 100%; background: var(--color-border-strong); border-radius: var(--radius-control); }
 .bar-col[data-worst="true"] .bar-track > span { background: var(--color-accent); }
 
+/* Shift trend */
+.trend { flex: 1; display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
+.trend[data-state="loading"], .trend[data-state="error"], .trend[data-state="empty"] { display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); font-size: var(--text-xs); font-weight: 600; }
+.key::before { content: ""; display: inline-block; width: 18px; height: 0; margin-right: var(--space-2); vertical-align: middle; border-top: 3px solid var(--color-text-muted); }
+.key.k1::before { border-top-color: var(--color-accent); }
+.key.kt::before { border-top: 2px dashed var(--color-border-strong); }
+.plot { flex: 1; min-height: 140px; display: flex; gap: var(--space-2); }
+.y-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: var(--text-xs); color: var(--color-text-muted); }
+.plot svg { flex: 1; min-width: 0; height: 100%; background: var(--color-surface-raised); border-radius: var(--radius-control); }
+.series { fill: none; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.series.s0 { stroke: var(--color-text-muted); }
+.series.s1 { stroke: var(--color-accent); }
+.target { stroke: var(--color-border-strong); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.x-axis { display: flex; justify-content: space-between; margin-left: 52px; font-size: var(--text-xs); color: var(--color-text-muted); }
+
 /* Container load */
 .layer { display: grid; gap: 3px; padding: var(--space-3); background: var(--color-surface-raised); border-radius: var(--radius-control); }
 .layer span { height: 10px; background: var(--color-border-strong); border-radius: 3px; }
@@ -259,6 +275,8 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 
 @media (max-width: 1500px) {
   .top { grid-template-columns: minmax(0, 1fr); }
+  .split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .split > .chat { grid-column: 1 / -1; }
 }
 
 @media (max-width: 1100px) {
@@ -272,6 +290,7 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
   .content { padding: var(--space-2) var(--space-4) 96px; }
   .split, .trio { grid-template-columns: minmax(0, 1fr); }
   .split > .card { height: auto; min-height: 320px; }
+  .split > .chat { grid-column: auto; }
   #shift[data-state="loading"], #shift[data-state="error"] { grid-column: auto; }
   .voice-strip { inset-inline: 0; max-width: calc(100% - var(--space-8)); padding: var(--space-2) var(--space-4); }
 }
