@@ -114,6 +114,7 @@ Left sidebar plus a scrolling content column. Desktop (1500 px and wider) puts t
 | Global voice-state pill | idle, listening, thinking, speaking, error |
 | MCP trace tile + drawer | empty, initializing, listing tools, calling tool, success, error |
 | Hero + line cards + output chart | empty, loading, populated, error |
+| Shift trend card | loading, populated (needs 2+ shifts), empty, error |
 | Handover panel | empty, loading, populated, error |
 | Follow-up panel | empty, loading, populated, error |
 | Container-load card | empty, calculating, result, invalid input, error |

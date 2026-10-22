@@ -79,6 +79,23 @@ function seed(db: Db): void {
   stock.run('LBL-ROLL', 'Label roll 100x50', 'rolls', 36, 20, 60, 3, 'Demo Print Works')
 }
 
+// Synthetic trend for the six days before the seeded shifts: percent of target per shift (A then B, oldest first).
+// INSERT OR IGNORE keeps this idempotent, so databases created before the trend card get it too.
+const HISTORY_START = Date.UTC(2026, 9, 15)
+const HISTORY_PCT = {
+  L1: { target: 1200, pct: [97, 94, 101, 96, 92, 98, 103, 99, 95, 90, 104, 96] },
+  L2: { target: 800, pct: [88, 84, 91, 86, 79, 83, 90, 85, 82, 77, 87, 80] },
+} as const
+function seedHistory(db: Db): void {
+  const insert = db.prepare('INSERT OR IGNORE INTO shift_output (line_id, shift_date, shift, target_units, produced_units, downtime_min) VALUES (?, ?, ?, ?, ?, ?)')
+  for (const [lineId, { target, pct }] of Object.entries(HISTORY_PCT)) {
+    pct.forEach((p, i) => {
+      const date = new Date(HISTORY_START + Math.floor(i / 2) * 86_400_000).toISOString().slice(0, 10)
+      insert.run(lineId, date, i % 2 === 0 ? 'A' : 'B', target, Math.round((target * p) / 100), Math.max(5, Math.round((105 - p) * 2)))
+    })
+  }
+}
+
 export function openDb(path = ':memory:'): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new DatabaseSync(path)
@@ -89,6 +106,7 @@ export function openDb(path = ':memory:'): Db {
   try {
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM lines').get() as { n: number }
     if (n === 0) seed(db)
+    seedHistory(db)
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')

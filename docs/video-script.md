@@ -35,7 +35,7 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 | Time | On screen | Narration | Exact input |
 |---|---|---|---|
 | 0:00 - 0:14 | Full page, nothing typed yet. Cursor still. | "Shift handover on a factory floor often lives on paper or in someone's head. LineLedger is a voice-first co-pilot for a plant manager, built for the Alexa+ track. This is a simulated voice experience in a web app, with synthetic data." | none |
-| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server with eight tools. The sidebar shows the negotiated protocol version. The trace drawer shows the real messages." | none |
+| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server with nine tools. The sidebar shows the negotiated protocol version. The trace drawer shows the real messages." | none |
 | 0:30 - 0:48 | Click the "Shift summary" button. A new `tools/call` for `get_shift_summary` appears at the end of the trace (the dashboard already called it once on page load, so older entries are above it). The dashboard shows both lines with status. | "Shift summary. The assistant calls one tool and reads back output against target. Line 2 is flagged behind." [On the seed data Line 1 shows "at risk", so do not say both are behind.] | click button "Shift summary" (sends `shift summary`) |
 | 0:48 - 1:08 | Type in the box and press Send. Trace shows `create_handover_note`, then a `list_handover_notes` call from the dashboard refresh. The new note appears in the dashboard Handover notes list. | "Now a handover note, saved through a tool call." | `add handover note for line 2: sealer jaw ran hot again at 14:00, heater band swapped` |
 | 1:08 - 1:25 | Type and Send. Trace shows `create_follow_up`, then a `list_follow_ups` call from the dashboard refresh. Dashboard Open follow-ups now has three entries. | "And a follow-up with an owner and a due date." | `add follow-up: re-check the guard, owner Asha, due 2026-10-24, line 2` |
@@ -75,7 +75,7 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 
   This is a simulated voice experience in a web app. All data is synthetic demo data. It is not connected to a real factory, a physical device or real customers.
 
-  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with eight tools, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
+  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with nine tools, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
 
   Repository (MIT): https://github.com/TXC2HYDRA/lineledger-mcp
   Container-load package (MIT): https://github.com/TXC2HYDRA/container-load-planner
