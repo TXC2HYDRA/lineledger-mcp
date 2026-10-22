@@ -4,7 +4,7 @@ LineLedger is a simulated voice co-pilot for a plant manager, backed by a self-h
 
 ## Tools used
 
-- **MCP TypeScript SDK 1.32.1**: server (stateless Streamable HTTP, eight tools with zod input and output schemas) and the browser client.
+- **MCP TypeScript SDK 1.32.1**: server (stateless Streamable HTTP, nine tools with zod input and output schemas) and the browser client.
 - **Strands Agents Python SDK (partly)**: an `agent/` service wired to a local Ollama model, with guards against accidental AWS or Bedrock use. Its guard tests pass (3 tests), including discovery of MCP tools over Streamable HTTP (the test asserts three tool names, not all eight). The local model itself has not been run, so I do not claim the agent works end to end.
 - **Vite**, **node:sqlite**, **vitest**, **headless Chrome** (to drive the dev page), and the **Web Speech API** (mic starts only after a click; typing always works).
 
