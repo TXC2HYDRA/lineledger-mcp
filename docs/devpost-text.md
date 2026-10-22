@@ -48,7 +48,7 @@ Optional local-model agent: the repository also contains a small Python service 
 
 **Primary track: Alexa+.** LineLedger is a voice-first assistant experience built as a web app with a simulated voice interface. It was not built with the Alexa+ developer console and does not run on a physical Alexa+ device.
 
-**Mini challenge: Open Source.** The container-load calculation lives in a separate, standalone MIT-licensed package, and LineLedger uses it as a pinned dependency. [VERIFY] Check the challenge rules on whether this package qualifies as a contribution (for example, when it was created and published).
+**Mini challenge: Open Source.** A new, additional open-source project, `container-load-planner`, created on 2026-10-21 (inside the submission period) under the MIT license, separate from the LineLedger repository. What I did: extracted the container-load calculation into its own package and published it with tests (49, run with `node --test`), CI, a license and install instructions. How it works: it counts how many identical boxes fit in a container on a uniform grid, keeping the box upright by default or trying all rotations when asked, and reports whether geometry or payload weight is the limit. It is a calculator, not a packing optimiser, and the 20ft and 40ft sizes are fixed example values. LineLedger depends on it, pinned to a commit, and calls it from the `plan_container_load` tool. Why it matters: a small, dependency-free TypeScript function that other logistics tools can reuse, with documented limits so nobody mistakes it for a carrier-grade loader.
 
 - GitHub username: TXC2HYDRA
 - Contribution URL: https://github.com/TXC2HYDRA/container-load-planner
