@@ -28,6 +28,14 @@ function icon(name: string): SVGSVGElement {
 
 const mcp = new McpConnection()
 
+// ---- views: one hash route per sidebar item; CSS decides what each view shows -----------------
+const VIEWS = ['home', 'assistant', 'followups', 'handover', 'container'] as const
+type View = (typeof VIEWS)[number]
+const VIEW_TITLE: Record<View, string> = { home: 'Home', assistant: 'Assistant', followups: 'Follow-ups', handover: 'Handover', container: 'Container load' }
+const VIEW_HEADING: Record<View, string> = { home: '#hero-h', assistant: '#chat-h', followups: '#followups-h', handover: '#notes-h', container: '#container-h' }
+let view: View = 'home'
+let followFilter: 'open' | 'closed' | 'all' = 'open'
+
 // ---- connection + voice state ---------------------------------------------------------------
 const CONN_ICON = { connecting: '◌', connected: '●', error: '✕' } as const
 function setConn(state: keyof typeof CONN_ICON, text: string) {
@@ -151,6 +159,10 @@ async function refreshShift() {
     setStatus($('hero-status'), status)
     $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
     renderBars(lines)
+    document.querySelectorAll<HTMLSelectElement>('select[name="line_id"]').forEach((sel) => {
+      if (sel.options.length > 1) return
+      for (const l of lines) sel.append(h('option', { value: l.line_id }, l.name))
+    })
     panel(
       'shift',
       'populated',
@@ -181,9 +193,9 @@ const row = (iconName: string, main: (Node | string)[], aside?: Node) =>
 
 async function refreshNotes() {
   try {
-    const { notes } = await data('list_handover_notes', { limit: 2 })
+    const { notes } = await data('list_handover_notes', { limit: view === 'handover' ? 50 : 2 })
     if (!notes.length) return panel('notes', 'empty', muted('No handover notes yet.'))
-    panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author}`)]))))
+    panel('notes', 'populated', h('ul', { class: 'rows' }, ...(notes as Data[]).map((n) => row('note', [n.text, h('span', { class: 'muted' }, `${n.line_id ?? 'All lines'} · ${n.author} · ${String(n.created_at).slice(0, 16).replace('T', ' ')}`)]))))
   } catch (e) {
     panel('notes', 'error', `Could not load notes: ${errorText(e)}`)
   }
@@ -191,9 +203,10 @@ async function refreshNotes() {
 
 async function refreshFollowUps() {
   try {
-    const { follow_ups } = await data('list_follow_ups', { status: 'open' })
-    $('followup-count').textContent = String(follow_ups.length)
-    if (!follow_ups.length) return panel('followups', 'empty', muted('No open follow-ups.'))
+    const status = view === 'followups' ? followFilter : 'open' // the home card and the badge always mean open items
+    const { follow_ups } = await data('list_follow_ups', { status })
+    if (status !== 'closed') $('followup-count').textContent = String((follow_ups as Data[]).filter((f) => f.status === 'open').length)
+    if (!follow_ups.length) return panel('followups', 'empty', muted(status === 'closed' ? 'No closed follow-ups.' : 'No open follow-ups.'))
     panel(
       'followups',
       'populated',
@@ -201,9 +214,11 @@ async function refreshFollowUps() {
         'ul',
         { class: 'rows' },
         ...(follow_ups as Data[]).map((f) => {
+          const meta = h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)
+          if (f.status === 'closed') return row('list', [`#${f.id} ${f.title}`, meta], h('span', { class: 'muted' }, 'Closed'))
           const close = h('button', { type: 'button', 'aria-label': `Close follow-up ${f.id}: ${f.title}` }, 'Close')
-          close.addEventListener('click', () => void send(`close follow-up ${f.id}`, false))
-          return row('list', [`#${f.id} ${f.title}`, h('span', { class: 'muted' }, `${f.owner}${f.due_date ? ` · due ${f.due_date}` : ''}${f.line_id ? ` · ${f.line_id}` : ''}`)], close)
+          close.addEventListener('click', () => void send(`close follow-up ${f.id}`, false, false))
+          return row('list', [`#${f.id} ${f.title}`, meta], close)
         }),
       ),
     )
@@ -247,8 +262,9 @@ async function askAgent(text: string): Promise<{ reply: string; tool_calls: { na
 
 // ---- sending a request ----------------------------------------------------------------------
 let busy = false
-async function send(text: string, fromVoice: boolean) {
+async function send(text: string, fromVoice: boolean, navigate = true) {
   if (busy || !text.trim()) return
+  if (navigate && view !== 'home' && view !== 'assistant') location.hash = '#/assistant' // the answer appears in the chat
   busy = true
   addMessage('You', text, 'user')
   if (modelMode) {
@@ -406,19 +422,109 @@ document.addEventListener('keydown', (ev) => {
     input.focus()
   }
 })
-// Sidebar: the clicked section becomes the current page; the trace item opens the drawer instead.
-document.querySelectorAll<HTMLAnchorElement>('.nav a').forEach((a) =>
-  a.addEventListener('click', () => {
-    if (a.id === 'open-trace') return
-    document.querySelectorAll('.nav a').forEach((o) => o.removeAttribute('aria-current'))
-    a.setAttribute('aria-current', 'page')
-  }),
-)
 document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Escape') return
   stopSpeaking()
   stopListening?.()
   if ($('voice-strip').dataset.state === 'speaking') setVoice('idle', 'Speech stopped.')
+})
+
+// ---- views, forms, theme ------------------------------------------------------------------------
+function showView(next: View, moveFocus: boolean) {
+  const changed = next !== view
+  view = next
+  $('content').dataset.view = view
+  $('crumb-view').textContent = VIEW_TITLE[view]
+  document.title = `${VIEW_TITLE[view]} · LineLedger`
+  document.querySelectorAll<HTMLAnchorElement>('.nav a[data-view]').forEach((a) => (a.dataset.view === view ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')))
+  document.querySelectorAll<HTMLElement>('[data-only]').forEach((el) => (el.hidden = el.dataset.only !== view))
+  if (changed) void Promise.all([refreshNotes(), refreshFollowUps()]) // list sizes and filters depend on the view
+  if (moveFocus) {
+    const heading = document.querySelector<HTMLElement>(VIEW_HEADING[view])
+    heading?.setAttribute('tabindex', '-1')
+    heading?.focus({ preventScroll: true })
+  }
+}
+const viewFromHash = (): View => {
+  const name = location.hash.replace(/^#\/?/, '')
+  return (VIEWS as readonly string[]).includes(name) ? (name as View) : 'home'
+}
+window.addEventListener('hashchange', () => showView(viewFromHash(), true))
+showView(viewFromHash(), false)
+
+document.querySelectorAll<HTMLButtonElement>('.seg [data-filter]').forEach((b) =>
+  b.addEventListener('click', () => {
+    followFilter = b.dataset.filter as typeof followFilter
+    document.querySelectorAll<HTMLButtonElement>('.seg [data-filter]').forEach((o) => o.setAttribute('aria-pressed', String(o === b)))
+    void refreshFollowUps()
+  }),
+)
+
+function bindForm(id: string, submit: (f: FormData) => Promise<string>) {
+  const form = $(id) as HTMLFormElement
+  const msg = form.querySelector<HTMLElement>('.form-msg')!
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    const btn = form.querySelector<HTMLButtonElement>('button[type="submit"]')!
+    btn.disabled = true
+    msg.dataset.state = ''
+    msg.textContent = 'Working...'
+    try {
+      msg.textContent = await submit(new FormData(form))
+      msg.dataset.state = 'ok'
+    } catch (e) {
+      msg.textContent = errorText(e)
+      msg.dataset.state = 'error'
+    } finally {
+      btn.disabled = false
+    }
+  })
+}
+const field = (f: FormData, k: string) => String(f.get(k) ?? '').trim()
+
+bindForm('followup-form', async (f) => {
+  const d = await data('create_follow_up', { title: field(f, 'title'), owner: field(f, 'owner'), ...(field(f, 'line_id') && { line_id: field(f, 'line_id') }), ...(field(f, 'due_date') && { due_date: field(f, 'due_date') }) })
+  ;($('followup-form') as HTMLFormElement).reset()
+  void refreshFollowUps()
+  return `Added follow-up #${d.id}.`
+})
+bindForm('note-form', async (f) => {
+  const d = await data('create_handover_note', { author: field(f, 'author'), text: field(f, 'text'), ...(field(f, 'line_id') && { line_id: field(f, 'line_id') }) })
+  const text = $('note-form').querySelector<HTMLTextAreaElement>('textarea')!
+  text.value = ''
+  void refreshNotes()
+  return `Saved note #${d.id}.`
+})
+bindForm('container-form', async (f) => {
+  panel('container', 'loading', muted('Calculating...'))
+  try {
+    const d = await data('plan_container_load', {
+      container_type: field(f, 'container_type'),
+      box_length_mm: Number(field(f, 'box_length_mm')),
+      box_width_mm: Number(field(f, 'box_width_mm')),
+      box_height_mm: Number(field(f, 'box_height_mm')),
+      box_weight_kg: Number(field(f, 'box_weight_kg')),
+      rotation: field(f, 'rotation'),
+    })
+    showContainer(d)
+    return `${d.count} boxes fit, limited by ${d.limitedBy}.`
+  } catch (e) {
+    panel('container', 'error', `Invalid input or error: ${errorText(e)}`)
+    throw e
+  }
+})
+
+const themeBtn = $('theme') as HTMLButtonElement
+themeBtn.setAttribute('aria-pressed', String(document.documentElement.dataset.theme === 'light'))
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
+  document.documentElement.dataset.theme = next
+  themeBtn.setAttribute('aria-pressed', String(next === 'light'))
+  try {
+    localStorage.setItem('theme', next)
+  } catch {
+    // private mode or blocked storage: the theme still applies for this visit
+  }
 })
 
 // ---- start ----------------------------------------------------------------------------------
