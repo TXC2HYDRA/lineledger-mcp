@@ -106,6 +106,47 @@ export function registerTools(server: McpServer, db: Db): void {
   )
 
   server.registerTool(
+    'get_shift_history',
+    {
+      title: 'Shift history',
+      description:
+        'Percent of target per line for the most recent shifts, oldest first. Use it for trends. All data is synthetic.',
+      inputSchema: { limit: z.number().int().min(2).max(60).default(14).describe('How many recent shifts to return') },
+      outputSchema: {
+        shifts: z.array(
+          z.object({
+            shift_date: z.string(),
+            shift: z.string(),
+            lines: z.array(z.object({ line_id: z.string(), name: z.string(), percent_of_target: z.number() })),
+          }),
+        ),
+      },
+      annotations: READ,
+    },
+    ({ limit }) => {
+      const rows = db
+        .prepare(
+          `SELECT s.shift_date, s.shift, s.line_id, l.name, s.target_units, s.produced_units
+           FROM shift_output s JOIN lines l ON l.id = s.line_id
+           WHERE (s.shift_date, s.shift) IN (
+             SELECT shift_date, shift FROM shift_output GROUP BY shift_date, shift ORDER BY shift_date DESC, shift DESC LIMIT ?)
+           ORDER BY s.shift_date, s.shift, s.line_id`,
+        )
+        .all(limit) as Row[]
+      type Entry = { shift_date: string; shift: string; lines: { line_id: string; name: string; percent_of_target: number }[] }
+      const byShift = new Map<string, Entry>() // Map keeps insertion order, and the query is already oldest first
+      for (const r of rows) {
+        const key = `${r.shift_date}|${r.shift}`
+        const entry = byShift.get(key) ?? { shift_date: r.shift_date as string, shift: r.shift as string, lines: [] }
+        byShift.set(key, entry)
+        entry.lines.push({ line_id: r.line_id as string, name: r.name as string, percent_of_target: Math.round(((r.produced_units as number) / (r.target_units as number)) * 1000) / 10 })
+      }
+      const shifts = [...byShift.values()]
+      return ok({ shifts })
+    },
+  )
+
+  server.registerTool(
     'create_handover_note',
     {
       title: 'Create handover note',

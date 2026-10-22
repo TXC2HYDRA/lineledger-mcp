@@ -97,6 +97,44 @@ function renderBars(lines: Data[]) {
   )
 }
 
+// Line chart of percent of target per shift. The SVG only draws geometry (it is stretched to fit); labels are HTML so text stays 14px+.
+function svgEl(tag: string, attrs: Record<string, string>): SVGElement {
+  const el = document.createElementNS(SVG, tag)
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
+  return el
+}
+
+async function refreshTrend() {
+  const box = $('trend')
+  try {
+    const { shifts } = await data('get_shift_history', { limit: 14 })
+    if (shifts.length < 2) {
+      box.dataset.state = 'empty'
+      return box.replaceChildren(muted('Not enough shift history yet.'))
+    }
+    const ids = (shifts[0].lines as Data[]).map((l) => l.line_id as string)
+    const series = ids.map((id) => ({ id, name: (shifts[0].lines as Data[]).find((l) => l.line_id === id)!.name as string, values: (shifts as Data[]).map((s) => (s.lines as Data[]).find((l) => l.line_id === id)?.percent_of_target as number) }))
+    const all = series.flatMap((s) => s.values)
+    const lo = Math.min(70, Math.floor(Math.min(...all) / 5) * 5)
+    const hi = Math.max(110, Math.ceil(Math.max(...all) / 5) * 5)
+    const x = (i: number) => (i / (shifts.length - 1)) * 100
+    const y = (v: number) => 100 - ((v - lo) / (hi - lo)) * 100
+    const svg = svgEl('svg', { viewBox: '0 0 100 100', preserveAspectRatio: 'none', role: 'img', 'aria-label': `Percent of target per shift, ${shifts.length} shifts. ${series.map((s) => `${s.name} from ${s.values[0]} to ${s.values.at(-1)} percent`).join('. ')}.` })
+    svg.append(svgEl('line', { x1: '0', x2: '100', y1: String(y(100)), y2: String(y(100)), class: 'target', 'vector-effect': 'non-scaling-stroke' }))
+    series.forEach((s, n) => svg.append(svgEl('polyline', { points: s.values.map((v, i) => `${x(i)},${y(v)}`).join(' '), class: `series s${n}`, 'vector-effect': 'non-scaling-stroke' })))
+    const label = (s: Data) => `${s.shift_date.slice(5)} ${s.shift}`
+    box.dataset.state = 'populated'
+    box.replaceChildren(
+      h('div', { class: 'legend' }, ...series.map((s, n) => h('span', { class: `key k${n}` }, `${s.name} · ${s.values.at(-1)}%`)), h('span', { class: 'key kt' }, 'Target 100%')),
+      h('div', { class: 'plot' }, h('div', { class: 'y-axis' }, h('span', {}, `${hi}%`), h('span', {}, `${lo}%`)), svg),
+      h('div', { class: 'x-axis' }, h('span', {}, label(shifts[0])), h('span', {}, label(shifts.at(-1)))),
+    )
+  } catch (e) {
+    box.dataset.state = 'error'
+    box.replaceChildren(muted(`Could not load shift trend: ${errorText(e)}`))
+  }
+}
+
 function setStatus(el: HTMLElement, status: Status) {
   el.dataset.status = status
   el.textContent = STATUS_LABEL[status]
@@ -196,7 +234,7 @@ function showContainer(d: Data) {
   )
 }
 
-const refreshAll = () => Promise.all([refreshShift(), refreshNotes(), refreshFollowUps()])
+const refreshAll = () => Promise.all([refreshShift(), refreshTrend(), refreshNotes(), refreshFollowUps()])
 
 // ---- planner mode: deterministic rules (default) or the local-model agent service -----------
 let modelMode = false
@@ -395,6 +433,6 @@ void (async () => {
   } catch (e) {
     setConn('error', 'MCP not reachable')
     setVoice('error', `Cannot reach the MCP server: ${errorText(e)}`)
-    for (const id of ['shift', 'notes', 'followups']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
+    for (const id of ['shift', 'notes', 'followups', 'trend']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
   }
 })()

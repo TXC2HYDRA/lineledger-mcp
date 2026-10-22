@@ -14,14 +14,14 @@ Factory-Floor Co-pilot: ask for the shift summary, leave a handover note or chec
 
 LineLedger is a voice-first assistant prototype for a plant manager or line operator. At a shift change the useful questions are short ones: how did each line do against target, what did the last shift leave behind, which follow-ups are still open, is a material running low, and how many boxes fit in a container. LineLedger answers these in a web app, by text or by voice.
 
-Each request is mapped to one of eight tools on a self-hosted Model Context Protocol (MCP) server. The server stores handover notes and follow-ups in SQLite, so they survive a restart. The web app shows the real JSON-RPC messages between the client and the server in a live trace panel, next to a shift dashboard.
+Each request is mapped to one of eight chat tools on a self-hosted Model Context Protocol (MCP) server. The server stores handover notes and follow-ups in SQLite, so they survive a restart. The web app shows the real JSON-RPC messages between the client and the server in a live trace panel, next to a shift dashboard.
 
 The server, database and web app run on one machine and use no paid service or cloud account. (The optional browser speech recognition may send audio to the browser vendor; see the data disclosure below.) All production, handover and stock data is synthetic. The voice experience is simulated in a browser; it is not an Alexa+ device skill.
 
 ## Key features
 
 - An MCP server written in TypeScript (`@modelcontextprotocol/sdk` 1.32.1) using stateless Streamable HTTP. It negotiates protocol version 2025-11-25; the preflight script and the tests check this.
-- Eight tools: `get_shift_summary`, `create_handover_note`, `list_handover_notes`, `create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
+- Nine tools: `get_shift_summary`, `get_shift_history` (read-only, feeds the dashboard trend chart), `create_handover_note`, `list_handover_notes`, `create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
 - Every tool has a zod input schema and output schema and returns `structuredContent`. Invalid input comes back as an `isError` result.
 - Handover notes and follow-ups persist in SQLite (`node:sqlite`).
 - `plan_container_load` calls a separate open-source package, container-load-planner (MIT), which counts how many identical boxes fit in a container on a uniform grid, limited by geometry and payload weight. It is a calculator, not a packing optimiser, and the 20ft and 40ft container sizes in the planner are fixed example values, not carrier specifications.
