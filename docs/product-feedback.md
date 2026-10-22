@@ -10,6 +10,14 @@ LineLedger is a simulated voice co-pilot for a plant manager, backed by a self-h
 
 We did **not** use the Alexa+ developer console or a physical Alexa+ device. No AWS service is called; the only AWS-listed technology we use is the Strands Agents SDK, running locally.
 
+## AWS Builder mini challenge: which AWS-listed technology we used and how
+
+- **Used:** the Strands Agents SDK (1.61.1), in the `agent/` service. It lets a local Ollama model (`qwen3:4b-instruct`) discover and call the LineLedger MCP server's nine tools over Streamable HTTP (`MCPClient(url=...)`). The web app has a switch to use it instead of the default rule-based planner.
+- **Not used:** no AWS service is called. No Bedrock, AgentCore, SageMaker or other AWS runtime service, and no AWS credentials. The agent has guards so it cannot reach one: scrubbed AWS environment, an explicit `OllamaModel`, loopback-only hosts, and a startup assertion, covered by 3 tests (`npm run test:agent`).
+- **Not used:** Kiro Crew.
+- **Result of the integration:** in a 10-prompt spike on a CPU-only laptop, 7 prompts were handled correctly, 1 had correct tool results but a misleading sentence, and 2 failed. Mean 12.9 s per turn. The default model `qwen3:4b` failed because it is a thinking model (friction log entry 9). Graded results: `docs/spike-results.md`. The agent is an experiment, not the default path.
+- **Documented integration:** `agent/`, `docs/friction-log.md` (entries 7 to 10), `docs/spike-results.md`, and `docs/aws-integration-plan.md`. The last one is a plan for adding real AWS services at zero cost. It is not built.
+
 ## What worked
 
 - The pinned stack worked on the first run. `npm install`, typecheck and the preflight passed, and 2025-11-25 was negotiated.
@@ -39,7 +47,7 @@ Strands with a local Ollama model worked end to end against the MCP server. Meas
 
 ## Optional feature requests
 
-Each is taken from the friction log (`docs/friction-log.md`).
+Each is taken from the friction log (`docs/friction-log.md`). Priority is our own rating.
 
 1. **Origin allowlist in `createMcpExpressApp()`**
    - Task: serve a local MCP server to a browser client.
@@ -47,6 +55,7 @@ Each is taken from the friction log (`docs/friction-log.md`).
    - Actual: Host validation only (SDK 1.32.1).
    - Workaround: custom Origin middleware, bound to 127.0.0.1.
    - Suggestion: an `allowedOrigins` option.
+   - Priority: Important (a safe default for a security rule in the spec).
 
 2. **Transport message observer**
    - Task: show real JSON-RPC traffic in the UI.
@@ -54,6 +63,7 @@ Each is taken from the friction log (`docs/friction-log.md`).
    - Actual: none on `StreamableHTTPServerTransport`.
    - Workaround: wrap `transport.send` and record `req.body`.
    - Suggestion: documented `onMessage` / `onSend` hooks.
+   - Priority: Nice-to-have.
 
 3. **Negotiated version on the client**
    - Task: prove 2025-11-25 was negotiated.
@@ -61,6 +71,7 @@ Each is taken from the friction log (`docs/friction-log.md`).
    - Actual: only `transport.protocolVersion`.
    - Workaround: check the raw `initialize` response and the transport property (`scripts/mcp-preflight.ts`).
    - Suggestion: `client.getNegotiatedProtocolVersion()`.
+   - Priority: Nice-to-have.
 
 4. **Lazy MCP start in Strands**
    - Task: unit-test the model guard without a model or MCP server.
@@ -68,3 +79,12 @@ Each is taken from the friction log (`docs/friction-log.md`).
    - Actual: `Agent(...)` raised "Failed to start MCP client".
    - Workaround: start the real MCP server (in-memory SQLite) in the test.
    - Suggestion: connect on first use, or an offline mode.
+   - Priority: Important (it makes unit tests need a live server).
+
+5. **Warn when `think: False` is ignored**
+   - Task: run a small local model through Strands and Ollama with a low token cap.
+   - Expected: `think: False` turns reasoning off, or an error says it cannot.
+   - Actual: a thinking model ignored it and hit the token cap with no answer (`MaxTokensReachedException`).
+   - Workaround: use a non-thinking model (`qwen3:4b-instruct`).
+   - Suggestion: a warning from the provider, and docs listing which models honour the option.
+   - Priority: Important (it looks like a model bug and costs hours).
