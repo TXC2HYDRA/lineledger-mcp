@@ -41,7 +41,8 @@
 
   /* Glass: translucent fills over the page glow. Percentages are the opacity of the fill.
      scripts/check-contrast.ts composites them over the worst-case backdrop, so keep them numeric. */
-  --glow-pct: 28%;            /* strongest page glow (accent over --color-bg) */
+  --blob-a: #222B42;          /* quiet slate-blue discs behind the glass */
+  --blob-b: #1C2230;
   --glass-pct: 55%;           /* cards, sidebar */
   --sheen-pct: 3%;            /* diagonal highlight across each glass card */
   --lift-pct: 5%;             /* white lift for controls and rows sitting on glass */
@@ -79,10 +80,8 @@
   --color-danger: #B42318;
   --color-focus: #B03A06;
 
-  --blob-a: #FFD9C0;          /* pastel backdrop colours: the blur on glass needs something coloured to blur */
-  --blob-b: #FBD3EA;
-  --blob-c: #D8E0FF;
-  --glow-pct: 10%;
+  --blob-a: #D6E0F2;          /* quiet slate-blue discs behind the glass */
+  --blob-b: #E3E8F0;
   --glass-pct: 48%;
   --pill-pct: 90%;
   --drawer-pct: 94%;
@@ -101,30 +100,13 @@ html, body { height: 100%; }
 body {
   margin: 0;
   background:
-    /* two hard-edged discs: the blur on the glass cards is only visible where the backdrop has an edge */
-    radial-gradient(circle 150px at 66% 40%, color-mix(in srgb, var(--color-accent) var(--glow-pct), transparent) 0 98%, transparent 100%),
-    radial-gradient(circle 110px at 27% 88%, color-mix(in srgb, var(--color-accent) var(--glow-pct), transparent) 0 98%, transparent 100%),
-    radial-gradient(900px 600px at 78% -8%, color-mix(in srgb, var(--color-accent) var(--glow-pct), transparent), transparent 70%),
-    radial-gradient(800px 600px at 4% 52%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 70%),
-    radial-gradient(900px 600px at 96% 102%, color-mix(in srgb, var(--color-accent) var(--glow-pct), transparent), transparent 70%),
-    radial-gradient(700px 500px at 8% 105%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 70%),
+    /* two quiet hard-edged discs: the blur on glass is only visible where the backdrop has an edge */
+    radial-gradient(circle 170px at 66% 38%, var(--blob-a) 0 98%, transparent 100%),
+    radial-gradient(circle 130px at 24% 84%, var(--blob-b) 0 98%, transparent 100%),
     var(--color-bg);
   background-attachment: fixed;
   color: var(--color-text);
   font: 400 var(--text-body)/1.45 var(--font-sans);
-}
-
-/* Light theme: white-ish glass over a white page shows nothing, so the page gets pastel colour fields and hard-edged discs. */
-[data-theme="light"] body {
-  background:
-    radial-gradient(circle 190px at 66% 38%, var(--blob-a) 0 98%, transparent 100%),
-    radial-gradient(circle 150px at 24% 84%, var(--blob-b) 0 98%, transparent 100%),
-    radial-gradient(circle 120px at 92% 16%, var(--blob-c) 0 98%, transparent 100%),
-    radial-gradient(900px 650px at 85% 0%, color-mix(in srgb, var(--blob-c) 80%, transparent), transparent 70%),
-    radial-gradient(800px 650px at 0% 45%, color-mix(in srgb, var(--blob-b) 70%, transparent), transparent 70%),
-    radial-gradient(900px 600px at 100% 105%, color-mix(in srgb, var(--blob-a) 80%, transparent), transparent 70%),
-    var(--color-bg);
-  background-attachment: fixed;
 }
 
 :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 3px; }
