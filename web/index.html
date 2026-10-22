@@ -7,55 +7,96 @@
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>LineLedger <span class="sub">Factory-Floor Co-pilot</span></h1>
-    <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
-    <p id="conn" class="conn" data-state="connecting" role="status"><span class="icon" aria-hidden="true">◌</span> <span id="conn-text">MCP connecting</span></p>
-  </header>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10" /></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z" /></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7" /></symbol>
+      <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10" /></symbol>
+      <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" /></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3a3 3 0 00-3 3v6a3 3 0 006 0V6a3 3 0 00-3-3zM5 11a7 7 0 0014 0M12 18v3" /></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-3-7z" /></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><path d="M7 7h10v10H7z" /></symbol>
+    </defs>
+  </svg>
 
-  <main class="grid">
-    <section class="card chat" aria-labelledby="chat-h">
-      <h2 id="chat-h">Chat</h2>
-      <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
-      <div class="chips" role="group" aria-label="Example requests">
-        <button type="button" class="chip" data-say="shift summary">Shift summary</button>
-        <button type="button" class="chip" data-say="open follow-ups">Open follow-ups</button>
-        <button type="button" class="chip" data-say="stock of hdpe">Stock of HDPE</button>
-        <button type="button" class="chip" data-say="how many 600x400x300 12kg boxes fit in a 20ft container">Container load</button>
+  <div class="app">
+    <aside class="sidebar" aria-label="Sidebar">
+      <a class="brand" href="#home">LineLedger<span class="sub">Factory-Floor Co-pilot</span></a>
+      <nav class="nav" aria-label="Primary">
+        <p class="nav-label">General</p>
+        <a href="#home" aria-current="page"><svg class="ico" aria-hidden="true"><use href="#i-home" /></svg>Home</a>
+        <a href="#chat-card"><svg class="ico" aria-hidden="true"><use href="#i-chat" /></svg>Assistant</a>
+        <p class="nav-label">Tools</p>
+        <a href="#followups-card"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Follow-ups</a>
+        <a href="#notes-card"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
+        <a href="#container-card"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
+        <p class="nav-label">Insights</p>
+        <a href="#trace-card"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
+      </nav>
+      <div class="sidebar-foot">
+        <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
+        <p id="conn" class="conn" data-state="connecting" role="status"><span class="icon" aria-hidden="true">◌</span> <span id="conn-text">MCP connecting</span></p>
       </div>
-      <form id="composer" class="composer" autocomplete="off">
-        <label for="text" class="sr-only">Type a request</label>
-        <input id="text" name="text" type="text" placeholder="Type a request..." maxlength="400" />
-        <button type="submit" id="send">Send</button>
-        <button type="button" id="listen" aria-pressed="false">🎙 Listen</button>
-        <button type="button" id="stop-speech" disabled>■ Stop speaking</button>
-        <button type="button" id="mode" aria-pressed="false" title="Switch between the rule-based planner and the local model">Planner: rules (no LLM)</button>
-      </form>
-    </section>
+    </aside>
 
-    <section class="card trace" aria-labelledby="trace-h">
-      <h2 id="trace-h">Live MCP trace</h2>
-      <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
-      <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
-    </section>
+    <div class="main" id="home">
+      <header class="topbar">
+        <p class="crumb"><span class="muted">Dashboard</span> / Home</p>
+        <form id="composer" class="composer" autocomplete="off">
+          <label for="text" class="sr-only">Type a request</label>
+          <input id="text" name="text" type="text" placeholder="Type a request..." maxlength="400" />
+          <button type="submit" id="send"><svg class="ico" aria-hidden="true"><use href="#i-send" /></svg>Send</button>
+          <button type="button" id="listen" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-mic" /></svg>Listen</button>
+          <button type="button" id="stop-speech" disabled><svg class="ico" aria-hidden="true"><use href="#i-stop" /></svg>Stop speaking</button>
+          <button type="button" id="mode" aria-pressed="false" title="Switch between the rule-based planner and the local model">Planner: rules (no LLM)</button>
+        </form>
+      </header>
 
-    <section class="card dash" aria-labelledby="dash-h">
-      <h2 id="dash-h">Shift dashboard</h2>
-      <div id="shift" class="panel" data-state="loading"><p class="muted">Loading shift output...</p></div>
-      <h3>Handover notes</h3>
-      <div id="notes" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
-      <h3>Open follow-ups</h3>
-      <div id="followups" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
-      <h3>Container load</h3>
-      <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
-    </section>
-  </main>
+      <main class="grid">
+        <section class="card chat" id="chat-card" aria-labelledby="chat-h">
+          <h2 id="chat-h">Chat</h2>
+          <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
+          <div class="chips" role="group" aria-label="Example requests">
+            <button type="button" class="chip" data-say="shift summary">Shift summary</button>
+            <button type="button" class="chip" data-say="open follow-ups">Open follow-ups</button>
+            <button type="button" class="chip" data-say="stock of hdpe">Stock of HDPE</button>
+            <button type="button" class="chip" data-say="how many 600x400x300 12kg boxes fit in a 20ft container">Container load</button>
+          </div>
+        </section>
 
-  <footer class="voice-strip" id="voice-strip" data-state="idle" role="status" aria-live="polite">
-    <span class="icon" id="voice-icon" aria-hidden="true">○</span>
-    <strong id="voice-state">IDLE</strong>
-    <span id="voice-detail" class="muted">Type or press Listen.</span>
-  </footer>
+        <section class="card trace" id="trace-card" aria-labelledby="trace-h">
+          <h2 id="trace-h">Live MCP trace</h2>
+          <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
+          <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
+        </section>
+
+        <section class="card dash" aria-labelledby="dash-h">
+          <h2 id="dash-h">Shift dashboard</h2>
+          <div id="shift" class="panel" data-state="loading"><p class="muted">Loading shift output...</p></div>
+          <section id="notes-card" aria-labelledby="notes-h">
+            <h3 id="notes-h">Handover notes</h3>
+            <div id="notes" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
+          </section>
+          <section id="followups-card" aria-labelledby="followups-h">
+            <h3 id="followups-h">Open follow-ups</h3>
+            <div id="followups" class="panel" data-state="loading"><p class="muted">Loading...</p></div>
+          </section>
+          <section id="container-card" aria-labelledby="container-h">
+            <h3 id="container-h">Container load</h3>
+            <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="voice-strip" id="voice-strip" data-state="idle" role="status" aria-live="polite">
+        <span class="icon" id="voice-icon" aria-hidden="true">○</span>
+        <strong id="voice-state">IDLE</strong>
+        <span id="voice-detail" class="muted">Type or press Listen.</span>
+      </footer>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
