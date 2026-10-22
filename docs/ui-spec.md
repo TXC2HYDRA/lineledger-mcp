@@ -60,27 +60,30 @@ There is no light theme. Add one only after the dark theme is stable.
 
 ## Layout
 
-Three-column CSS Grid at desktop; stacks below the narrow breakpoint without hiding the composer or the voice-state strip.
+Left sidebar plus a scrolling content column. Desktop (1500 px and wider) puts the hero and the line cards in one row; below that they stack.
 
 ```
-┌───────────────────────────────────────────────────────────────────────────┐
-│ LINELEDGER · SYNTHETIC DEMO DATA                         ● MCP connected  │
-├───────────────────────┬─────────────────────────┬─────────────────────────┤
-│ CHAT                  │ LIVE MCP TRACE          │ SHIFT DASHBOARD         │
-│ Assistant transcript  │ initialize              │ Output / target         │
-│ Operator request      │  request + response     │ Line 1   Line 2         │
-│ Assistant result      │ tools/list              │ progress progress       │
-│                       │  tool schemas           │                         │
-│                       │ tools/call              │ Handover notes          │
-│                       │  args + result          │ Open follow-ups         │
-│ [ Type a request... ] │                         │ Container-load result   │
-│ [🎙 Listen] [ Send ]  │                         │ MCP App card (optional) │
-├───────────────────────┴─────────────────────────┴─────────────────────────┤
-│ ● IDLE · LISTENING · THINKING · SPEAKING · ERROR     (text + icon)        │
-└───────────────────────────────────────────────────────────────────────────┘
+┌────────────┬──────────────────────────────────────────────────────────────┐
+│ LineLedger │ Dashboard / Home  [ Type a request (press /) ] Send Listen … │
+│ GENERAL    ├───────────────────────┬──────────────┬──────────────┬────────┤
+│  Home      │ Plant output          │ Line 1 card  │ Line 2 card  │ + stock│
+│  Assistant │ 80.7%  ◆ AT RISK      │ % · bar      │ % · bar      │ dashed │
+│ TOOLS      │ [Shift summary] [..]  │              │              │        │
+│  Follow-ups├───────────────────────┴──────────────┴──────────────┴────────┤
+│  Handover  │ Chat transcript (wide)               │ Output vs target bars  │
+│  Container ├──────────────┬──────────────┬────────┴──────┬─────────────────┤
+│ INSIGHTS   │ Open         │ Handover     │ Container     │ MCP trace tile  │
+│  MCP trace │ follow-ups   │ notes        │ load          │ (opens drawer)  │
+│ [SYNTHETIC │              │              │               │                 │
+│  DEMO DATA]│              │      ( ● IDLE · voice state pill )              │
+└────────────┴──────────────┴──────────────┴───────────────┴─────────────────┘
 ```
 
-At 1920x1080 all three panels are visible. No remote images, no blur, no heavy animation.
+- The command bar is the composer. `/` or Ctrl/Cmd+K focuses it.
+- The MCP trace is a right-edge drawer (native `<dialog>`). Escape or a backdrop click closes it.
+- Below 1100 px the sidebar becomes a top block (brand, nav row, synthetic-data card) and every row stacks to one column. The composer and the voice pill stay on screen.
+- At 1920x1080 the hero, line cards, chat, chart and data cards are visible without scrolling in the empty states. A populated container-load result makes the bottom row taller, so the column scrolls a little. The bottom 96 px of the column is reserved for the voice pill.
+- No remote images, no blur, no heavy animation.
 
 ## Voice states
 
@@ -103,25 +106,24 @@ At 1920x1080 all three panels are visible. No remote images, no blur, no heavy a
 
 | Component | States |
 |---|---|
-| Header / connection status | idle, connecting, connected, error |
+| Sidebar connection card | connecting, connected, error (always shows SYNTHETIC DEMO DATA) |
 | Chat transcript | empty, idle, thinking, error |
 | Text composer | empty, idle, thinking, error |
 | Microphone control | idle, listening, error |
 | Voice output indicator | idle, speaking, error |
-| Global voice-state strip | idle, listening, thinking, speaking, error |
-| MCP trace panel | empty, initializing, listing tools, calling tool, success, error |
-| Shift dashboard | empty, loading, populated, error |
+| Global voice-state pill | idle, listening, thinking, speaking, error |
+| MCP trace tile + drawer | empty, initializing, listing tools, calling tool, success, error |
+| Hero + line cards + output chart | empty, loading, populated, error |
 | Handover panel | empty, loading, populated, error |
 | Follow-up panel | empty, loading, populated, error |
 | Container-load card | empty, calculating, result, invalid input, error |
 | MCP App card | empty, loading, rendered, unsupported, error (label "MCP App" only if compliant) |
-| Theme control (optional) | idle, focused, active |
 
-Every state is driven by real application events. An error never silently turns into success. The trace panel reads from the server-side trace tap, so it cannot show traffic that did not happen.
+Every state is driven by real application events. An error never silently turns into success. The trace tile and drawer read from the server-side trace tap, so it cannot show traffic that did not happen.
 
 ## Acceptance
 
-- Screenshot at exactly 1920x1080 stored at `artifacts/lineledger-1920x1080.png` and visually inspected.
+- Screenshot at exactly 1920x1080 stored at `artifacts/lineledger-1920x1080.png` and visually inspected (taken after Shift summary and Stock of HDPE, so the bottom row is not stretched by a container result).
 - `npm run check:contrast` passes for every foreground/background pair in use.
 - Keyboard-only pass through composer, voice, send and any dashboard control.
-- "SYNTHETIC DEMO DATA" visible on screen at all times. No claim of live factory monitoring.
+- "SYNTHETIC DEMO DATA" visible on screen at all times (sidebar card; top block on narrow screens). No claim of live factory monitoring.
