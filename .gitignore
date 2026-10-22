@@ -10,6 +10,7 @@ __pycache__/
 .env.*
 !.env.example
 .aws/
+.aws-lineledger/
 *.pem
 *.key
 credentials*
