@@ -231,6 +231,25 @@ describe('tools', () => {
       expect(r2.isError).toBe(true)
     }
   })
+
+  it('plans a container load from the flat form with a container preset', async () => {
+    const { client } = await connect()
+    const flat = { container_type: '20ft', box_length_mm: 600, box_width_mm: 400, box_height_mm: 300, box_weight_kg: 12 }
+    const r = await call(client, 'plan_container_load', flat)
+    expect(r.isError).toBeFalsy()
+    const nested = await call(client, 'plan_container_load', {
+      container: { length: 5898, width: 2352, height: 2393, maxPayloadKg: 28200 },
+      item: { length: 600, width: 400, height: 300, weightKg: 12 },
+    })
+    expect(r.structuredContent).toEqual(nested.structuredContent)
+    // missing pieces get a message that names what to supply
+    const noBox = await call(client, 'plan_container_load', { container_type: '20ft' })
+    expect(noBox.isError).toBe(true)
+    expect(JSON.stringify(noBox.content)).toContain('box_length_mm')
+    const noContainer = await call(client, 'plan_container_load', { ...flat, container_type: undefined })
+    expect(noContainer.isError).toBe(true)
+    expect(JSON.stringify(noContainer.content)).toContain('container_type')
+  })
 })
 
 describe('http hardening', () => {
