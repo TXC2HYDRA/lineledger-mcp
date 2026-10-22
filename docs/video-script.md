@@ -60,7 +60,7 @@ Narration word count is about 205 words (counted from the table), which fits 2:4
 These are not part of the 2:40 plan. If you add one, drop the stock beat to stay under 3:00.
 
 1. Voice input (optional, NOT TESTED by us). Only include it if you tested the Listen button in your own browser beforehand. Click Listen, say "shift summary", show the voice strip going from listening to thinking to speaking, and the spoken reply. In Chrome, speech recognition sends audio to the browser vendor's service, which is not run by this project. Say so in one line: "Speech recognition here is the browser's own, and in Chrome the audio goes to the browser vendor's service." Typed requests are never spoken back, only voice requests. Narration if used: "Voice works when the browser supports it. Text always works." Do not claim it works in factory noise.
-2. Local model (optional, [ONLY IF SPIKE PASSES]). The model spike has not been run, so we do not claim the local model agent works. If you run the spike and it passes (tool calls correct, latency acceptable on your machine), switch the "Planner" button to the local model, send one request, and show the same `tools/call` in the trace. Narration if used: "The default is a rule-based planner with no language model. Optionally, a small local model can choose the tools instead, pointed at a model server on this machine." [Only say "no cloud call" if you checked it yourself while recording.] If the spike fails or is flaky, delete this beat and do not mention the local model.
+2. Local model (optional, not recommended). The 10-prompt spike on `qwen3:4b-instruct` got 7 prompts fully right, 1 partly wrong and 2 failed (an invented shift date and a missing tool call), at about 13 s per turn on CPU, so do not present it as reliable. If you still show it, switch the "Planner" button to the local model, use only a prompt you rehearsed and saw succeed (for example `list open follow-ups`, which worked in every spike run; `stock of HDPE` failed in one run), expect a wait of several seconds, and show the same `tools/call` in the trace. Narration if used: "The default is a rule-based planner with no language model. Optionally, a small local model can choose the tools instead, running on this machine." [Only say "no cloud call" if you checked it yourself while recording.] If it fails on camera, cut the beat and do not mention the local model.
 
 ## Upload notes
 
@@ -91,5 +91,5 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 - Microphone and speech in a real browser.
 - Production `vite preview` build.
 - Real-keyboard pass of the UI.
-- Local model tool-calling and latency.
+- Local model reliability: only one 10-prompt spike, with 3 of 10 prompts wrong or failed. See `docs/spike-results.md`.
 - The container-load-planner CI status and its test count. [VERIFY before saying anything about them.]
