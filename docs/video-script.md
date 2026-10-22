@@ -28,7 +28,7 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 
 - `SYNTHETIC DEMO DATA` badge (sidebar, bottom).
 - `MCP connected · protocol 2025-11-25` (sidebar, bottom).
-- The "Live MCP trace" tile, whose pulse grid moves with every message. Open the full trace drawer from the tile or the sidebar "MCP trace" item whenever a beat says "Trace shows"; close it with Escape. The drawer shows real `tools/call` entries as they happen. These come from the server-side trace tap, not from the page, so what you see is what was sent.
+- The "Live MCP trace" tile, whose pulse grid moves with every message. Use the sidebar to open a full-page view (Assistant, Follow-ups, Handover, Container load) or the theme toggle in the top bar. Open the full trace drawer from the tile or the sidebar "MCP trace" item whenever a beat says "Trace shows"; close it with Escape. The drawer shows real `tools/call` entries as they happen. These come from the server-side trace tap, not from the page, so what you see is what was sent.
 
 ## Shot list
 
