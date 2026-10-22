@@ -67,7 +67,7 @@ Optional local-model agent: the repository also contains a small Python service 
 - No AWS service or other paid cloud API is used or called. The project needs no cloud credentials.
 - `node:sqlite` is an experimental Node feature and prints an ExperimentalWarning at startup.
 
-What was tested: `npm test` (18 tests, including a real MCP client over HTTP, hardening checks and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
+What was tested: `npm test` (19 tests, including a real MCP client over HTTP, hardening checks and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
 
 ## Setup
 
