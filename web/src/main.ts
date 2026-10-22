@@ -284,16 +284,42 @@ function traceLabel(e: Data): string {
   const tool = m.method === 'tools/call' ? ` ${m.params?.name}` : ''
   return `${e.dir === 'in' ? '→ request' : '← response'} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
 }
+const PULSE_CELLS = 49
+const pulse: ('in' | 'out' | 'err')[] = []
+let traceCount = 0
+function drawPulse() {
+  $('trace-count').textContent = String(traceCount)
+  $('trace-pulse').replaceChildren(...Array.from({ length: PULSE_CELLS }, (_, i) => h('span', { 'data-kind': pulse[i - (PULSE_CELLS - pulse.length)] ?? 'none' })))
+}
 function startTrace() {
   const list = $('trace-list')
+  drawPulse()
   const es = new EventSource('/api/trace/stream')
   es.onmessage = (ev) => {
     const e = JSON.parse(ev.data) as Data
     list.append(h('li', {}, h('details', {}, h('summary', {}, h('span', { class: `dir ${e.dir}` }, traceLabel(e))), h('pre', {}, JSON.stringify(e.message, null, 2)))))
     while (list.children.length > 200) list.firstElementChild!.remove()
     list.lastElementChild!.scrollIntoView({ block: 'end' })
+    pulse.push(e.message?.error ? 'err' : e.dir)
+    if (pulse.length > PULSE_CELLS) pulse.shift()
+    traceCount++
+    drawPulse()
   }
 }
+
+const traceDialog = $('trace-dialog') as HTMLDialogElement
+function openTrace() {
+  traceDialog.showModal()
+  $('trace-list').lastElementChild?.scrollIntoView({ block: 'end' })
+}
+$('trace-card').addEventListener('click', openTrace)
+$('open-trace').addEventListener('click', (ev) => {
+  ev.preventDefault()
+  openTrace()
+})
+traceDialog.addEventListener('click', (ev) => {
+  if (ev.target === traceDialog) traceDialog.close() // click on the backdrop
+})
 
 // ---- wiring ---------------------------------------------------------------------------------
 const input = $('text') as HTMLInputElement
