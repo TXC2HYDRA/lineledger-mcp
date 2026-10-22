@@ -110,6 +110,8 @@ If CORS is ever needed with sessions on: expose `Mcp-Session-Id`. **VERIFY** wit
 
 ## D6. Model choice (for approval)
 
+> Update 2026-10-22: this was the plan before the spike. `qwen3:4b` is a thinking model whose template ignores `think: False`, so it failed at the 512-token cap and was deleted. The model actually used is `qwen3:4b-instruct`. See `docs/spike-results.md`.
+
 - First choice: `qwen3:4b` (about 2.5 GB, Apache-2.0). Fits the ~9 GiB of free RAM with margin and
   runs faster on CPU. Qwen3 emits "thinking" tokens by default, which costs CPU time. **VERIFY** how to
   turn thinking off in the spike.
