@@ -1,4 +1,4 @@
-import { summarize } from './format.js'
+import { STATUS_LABEL, statusOf, summarize, type Status } from './format.js'
 import { McpConnection, type ToolResult } from './mcp.js'
 import { plan } from './planner.js'
 import { canListen, canSpeak, listen, speak, stopSpeaking } from './voice.js'
@@ -56,25 +56,40 @@ async function data(name: string, args: Record<string, unknown> = {}): Promise<D
   return r.structuredContent ?? {}
 }
 
+function setStatus(el: HTMLElement, status: Status) {
+  el.dataset.status = status
+  el.textContent = STATUS_LABEL[status]
+}
+
 async function refreshShift() {
   try {
     const d = await data('get_shift_summary')
+    const lines = d.lines as Data[]
+    const status = statusOf(d.totals.percent_of_target)
+    const downtime = lines.reduce((sum, l) => sum + l.downtime_min, 0)
+    $('hero-sub').textContent = `Shift ${d.shift} · ${d.shift_date} · output / target`
+    $('hero-metric').textContent = `${d.totals.percent_of_target}%`
+    setStatus($('hero-status'), status)
+    $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
     panel(
       'shift',
       'populated',
-      h('p', { class: 'muted' }, `Shift ${d.shift} · ${d.shift_date} · output / target`),
-      h('p', { class: 'metric' }, `${d.totals.percent_of_target}%`),
-      ...(d.lines as Data[]).map((l) =>
-        h(
-          'div',
-          { class: 'line-row' },
-          h('div', { class: 'line-head' }, h('span', {}, `${l.name} · ${l.product}`), h('span', { class: 'status', 'data-status': l.status }, `${l.status.replace('_', ' ').toUpperCase()}`)),
+      ...lines.map((l) => {
+        const st = h('span', { class: 'status' })
+        setStatus(st, l.status)
+        return h(
+          'article',
+          { class: 'card stat', 'data-status': l.status },
+          h('div', { class: 'stat-head' }, h('span', { class: 'tag' }, l.line_id), h('strong', {}, l.name), st),
+          h('p', { class: 'muted' }, l.product),
+          h('p', { class: 'stat-value' }, `${l.percent_of_target}%`),
           h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${l.produced_units} of ${l.target_units}, ${l.percent_of_target} percent` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, l.percent_of_target)}%` })),
-          h('span', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
-        ),
-      ),
+          h('p', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+        )
+      }),
     )
   } catch (e) {
+    $('hero-sub').textContent = 'Shift output unavailable.'
     panel('shift', 'error', `Could not load shift output: ${errorText(e)}`)
   }
 }
@@ -233,7 +248,7 @@ $('composer').addEventListener('submit', (ev) => {
   input.value = ''
   void send(text, false)
 })
-document.querySelectorAll<HTMLButtonElement>('.chip').forEach((b) => b.addEventListener('click', () => void send(b.dataset.say!, false)))
+document.querySelectorAll<HTMLButtonElement>('[data-say]').forEach((b) => b.addEventListener('click', () => void send(b.dataset.say!, false)))
 
 const listenBtn = $('listen') as HTMLButtonElement
 let stopListening: (() => void) | null = null
