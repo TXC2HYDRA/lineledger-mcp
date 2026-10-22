@@ -33,7 +33,7 @@
         <a href="#notes-card"><svg class="ico" aria-hidden="true"><use href="#i-note" /></svg>Handover</a>
         <a href="#container-card"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Container load</a>
         <p class="nav-label">Insights</p>
-        <a href="#trace-card"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
+        <a href="#trace-card" id="open-trace"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>MCP trace</a>
       </nav>
       <div class="sidebar-foot">
         <p class="badge" id="synthetic-badge">SYNTHETIC DEMO DATA</p>
@@ -98,13 +98,14 @@
             <h2 id="container-h">Container load</h2>
             <div id="container" class="panel" data-state="empty"><p class="muted">Ask: "how many 600x400x300 12kg boxes fit in a 20ft container".</p></div>
           </section>
+          <button type="button" class="card tile" id="trace-card" aria-haspopup="dialog">
+            <span class="tile-head">Live MCP trace</span>
+            <span class="tile-value"><span id="trace-count">0</span> <span class="muted">messages</span></span>
+            <span class="pulse" id="trace-pulse" aria-hidden="true"></span>
+            <span class="muted">Open the full JSON-RPC trace</span>
+          </button>
         </div>
 
-        <section class="card trace" id="trace-card" aria-labelledby="trace-h">
-          <h2 id="trace-h">Live MCP trace</h2>
-          <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
-          <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
-        </section>
       </main>
 
       <footer class="voice-strip" id="voice-strip" data-state="idle" role="status" aria-live="polite">
@@ -114,6 +115,15 @@
       </footer>
     </div>
   </div>
+
+  <dialog class="drawer" id="trace-dialog" aria-labelledby="trace-h">
+    <div class="drawer-head">
+      <h2 id="trace-h">Live MCP trace</h2>
+      <form method="dialog"><button type="submit" id="trace-close">Close</button></form>
+    </div>
+    <p class="muted" id="trace-note">Every JSON-RPC message the server sends and receives.</p>
+    <ol id="trace-list" class="trace-list" aria-label="MCP trace"></ol>
+  </dialog>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
