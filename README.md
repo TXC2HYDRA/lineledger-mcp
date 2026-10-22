@@ -74,7 +74,7 @@ Where `@modelcontextprotocol/sdk` 1.32.1 is imported and called at runtime:
 | `server/app.ts` | Creates an `McpServer` and a `StreamableHTTPServerTransport` per POST to `/mcp`, calls `server.connect(transport)` and `transport.handleRequest(...)`. Uses the SDK's `hostHeaderValidation`. |
 | `server/tools.ts` | Nine `server.registerTool(...)` calls with zod input and output schemas, `structuredContent`, `isError` results and tool annotations. |
 | `web/src/mcp.ts` | The browser uses the SDK `Client` with `StreamableHTTPClientTransport` to call the tools. |
-| `scripts/mcp-preflight.ts` | Starts a minimal one-tool (`ping`) server on an ephemeral port, separate from the LineLedger server, and runs `initialize`, `tools/list` and `tools/call` through the SDK client. It checks the SDK and protocol version, not the eight LineLedger tools. |
+| `scripts/mcp-preflight.ts` | Starts a minimal one-tool (`ping`) server on an ephemeral port, separate from the LineLedger server, and runs `initialize`, `tools/list` and `tools/call` through the SDK client. It checks the SDK and protocol version, not the nine LineLedger tools. |
 | `tests/server.test.ts` | A real SDK client talks to the server over HTTP. |
 
 Transport behaviour: stateless Streamable HTTP, `GET` and `DELETE` on `/mcp` return 405 with
