@@ -4,69 +4,32 @@ Voice-first factory-floor co-pilot. Synthetic demo data only.
 
 ## Style decision
 
-- Primary style: **Bento Grid**. Independent cards separate three tasks: chat, live MCP trace, shift dashboard.
+- Primary style: **dark dashboard with a left sidebar** (Vaulto-style reference). Sidebar navigation, a top command bar, a hero metric, then independent cards.
 - Secondary style: **Swiss Design**. One sans-serif family, strong alignment, clear hierarchy, consistent numerals.
-- Default palette: **high-contrast, solid-surface dark UI**. No blur, no transparency, no gradients.
+- Palette: neutral near-black surfaces, one orange accent (`#FF5A1F`). Red (`--color-danger`) means "behind", never decoration.
+- Cards are **solid surfaces**. No blur, no transparency on cards or text.
+- One decorative exception to the old "no gradients" rule: a static radial glow on the page background, behind the cards. It carries no text and no state.
+- Deliberate departures from the reference, kept for accessibility: text is 14 px or larger, every text pair passes WCAG AA, labels on orange use the dark `--color-bg` (white on orange fails 4.5:1).
 - Rejected: Glassmorphism (blur makes contrast fragile), Neumorphism (low-contrast boundaries hide focus), Cyberpunk (neon undermines business credibility).
 
 ## Design tokens
 
+Source of truth is the `:root` block in `web/src/style.css`. `npm run check:contrast` reads it. Token names are stable; change values, not names.
+
+| Token | Value | Use |
+|---|---|---|
+| `--color-bg` | `#0A0A0B` | page background, label colour on accent fills |
+| `--color-surface` | `#121214` | cards, sidebar |
+| `--color-surface-raised` | `#1B1B1F` | rows, inputs, nested panels |
+| `--color-border` | `#2A2A30` | decorative card edges only |
+| `--color-border-strong` | `#6B6B76` | control boundaries (inputs, buttons) |
+| `--color-text` / `--color-text-muted` | `#F5F5F6` / `#A8A8B3` | text |
+| `--color-accent` / `--color-focus` | `#FF5A1F` | primary action, focus ring, selected state |
+| `--color-success` / `--color-warning` / `--color-danger` | `#34D399` / `#FBBF24` / `#FF6B6B` | on track / at risk / behind |
+
+Type scale: 14 (minimum) / 18 body / 24 section / 32 metric / 56 hero. Spacing 4-8-12-16-24-32-48. Radius 12 control, 16 card, 20 panel. Motion 120 to 180 ms.
+
 ```css
-:root {
-  color-scheme: dark;
-
-  /* Surfaces */
-  --color-bg: #0B1220;
-  --color-surface: #111C2E;
-  --color-surface-raised: #19273B;
-  --color-border: #334155;          /* decorative card edges only */
-  --color-border-strong: #64748B;   /* control boundaries (inputs, buttons): >= 3:1 on all dark surfaces */
-
-  /* Text */
-  --color-text: #F1F5F9;
-  --color-text-muted: #B7C4D8;
-
-  /* Accent and status */
-  --color-accent: #2DD4BF;
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-danger: #F87171;
-  --color-focus: #2DD4BF;
-
-  /* Typography */
-  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
-  --text-xs: 14px;      /* minimum size for any text */
-  --text-body: 18px;
-  --text-section: 24px;
-  --text-metric: 32px;
-  --text-hero: 40px;
-
-  /* Spacing */
-  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
-  --space-6: 24px; --space-8: 32px; --space-12: 48px;
-
-  /* Shape */
-  --radius-control: 8px;
-  --radius-card: 12px;
-  --radius-panel: 16px;
-
-  /* Motion (state must never depend on animation) */
-  --motion-fast: 120ms;
-  --motion-normal: 180ms;
-}
-
-[data-theme="light"] {            /* lower priority: only after the dark theme is stable */
-  color-scheme: light;
-  --color-bg: #F8FAFC;
-  --color-surface: #FFFFFF;
-  --color-surface-raised: #E2E8F0;
-  --color-border: #64748B;
-  --color-text: #0F172A;
-  --color-text-muted: #334155;
-  --color-accent: #0F766E;
-  --color-focus: #0F766E;
-}
-
 :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -78,26 +41,22 @@ Voice-first factory-floor co-pilot. Synthetic demo data only.
 }
 ```
 
-### Contrast (WCAG 2.x, computed locally in Phase 0, not copied)
+### Contrast (WCAG 2.x, computed by `npm run check:contrast`)
 
-| Foreground | on `--color-bg` #0B1220 | on `--color-surface` #111C2E | on `--color-surface-raised` #19273B |
+| Foreground | on bg | on surface | on raised |
 |---|---|---|---|
-| text #F1F5F9 | 17.09 | 15.59 | 13.74 |
-| text-muted #B7C4D8 | 10.61 | 9.68 | 8.53 |
-| accent #2DD4BF | 10.06 | 9.18 | 8.09 |
-| success #22C55E | 8.22 | 7.50 | 6.61 |
-| warning #F59E0B | 8.72 | 7.95 | 7.01 |
-| danger #F87171 | 6.77 | 6.18 | 5.44 |
+| text | 18.16 | 17.17 | 15.76 |
+| text-muted | 8.40 | 7.94 | 7.29 |
+| accent | 6.35 | 6.00 | 5.51 |
+| success | 10.29 | 9.73 | 8.93 |
+| warning | 11.85 | 11.21 | 10.28 |
+| danger | 7.13 | 6.74 | 6.19 |
 
-All text pairs pass the 4.5:1 AA minimum.
+Dark label (`--color-bg`) on accent fill: 6.35. All text pairs pass the 4.5:1 AA minimum.
 
-Non-text boundaries (WCAG 1.4.11 needs 3:1):
+Non-text boundaries (WCAG 1.4.11 needs 3:1): `--color-border-strong` is 3.76 on bg, 3.55 on surface, 3.26 on raised. `--color-border` is decorative only. Focus ring `--color-focus` is 5.51 or better.
 
-- `--color-border` #334155 is only 1.81:1 on bg and 1.65:1 on surface. Use it for decorative card edges only.
-- `--color-border-strong` #64748B is 3.93 on bg, 3.59 on surface, 3.16 on raised. Use it for every input, button and control boundary.
-- Light theme (`#0F172A` on `#F8FAFC`) 17.06; muted `#334155` on `#FFFFFF` 10.35; accent `#0F766E` on `#F8FAFC` 5.23; border `#64748B` on `#F8FAFC` 4.55.
-
-`npm run check:contrast` (Phase 2) must recompute these from the actual CSS values and fail on any normal-text pair below 4.5:1.
+There is no light theme. Add one only after the dark theme is stable.
 
 ## Layout
 
