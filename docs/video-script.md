@@ -20,27 +20,27 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 4. Set the screen or capture area to 1920x1080. Record only the page area (or a borderless window), so no browser toolbar, bookmarks or browser logo is visible.
 5. Close all other tabs and apps. Turn on Do Not Disturb so no notification pops up.
 6. Terminal for the restart beat: clean prompt (no personal name, host name or home path), large font, `cd` already in the repo. Terminal text must be readable at 1080p.
-7. Open the page, confirm the top bar shows `SYNTHETIC DEMO DATA` and `MCP connected · protocol 2025-11-25`, and that the "Live MCP trace" panel is visible without scrolling.
+7. Open the page, confirm the sidebar card shows `SYNTHETIC DEMO DATA` and `MCP connected · protocol 2025-11-25`, and that the "Live MCP trace" tile (bottom right) shows a message count.
 8. Rehearse once with the stopwatch. The container beat and the restart beat are the ones most likely to run long.
 9. Check once that no reply text on screen contains anything you do not want shown (the data is synthetic, so this should be clean).
 
 ## Always visible on screen
 
-- `SYNTHETIC DEMO DATA` badge (top bar).
-- `MCP connected · protocol 2025-11-25` (top bar).
-- The "Live MCP trace" panel, showing real `tools/call` entries as they happen. These come from the server-side trace tap, not from the page, so what you see is what was sent.
+- `SYNTHETIC DEMO DATA` badge (sidebar, bottom).
+- `MCP connected · protocol 2025-11-25` (sidebar, bottom).
+- The "Live MCP trace" tile, whose pulse grid moves with every message. Open the full trace drawer from the tile or the sidebar "MCP trace" item whenever a beat says "Trace shows"; close it with Escape. The drawer shows real `tools/call` entries as they happen. These come from the server-side trace tap, not from the page, so what you see is what was sent.
 
 ## Shot list
 
 | Time | On screen | Narration | Exact input |
 |---|---|---|---|
 | 0:00 - 0:14 | Full page, nothing typed yet. Cursor still. | "Shift handover on a factory floor often lives on paper or in someone's head. LineLedger is a voice-first co-pilot for a plant manager, built for the Alexa+ track. This is a simulated voice experience in a web app, with synthetic data." | none |
-| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the three areas: chat, live MCP trace, shift dashboard. | "Behind the chat is a self-hosted MCP server with eight tools. The top bar shows the negotiated protocol version. The middle panel shows the real messages." | none |
-| 0:30 - 0:48 | Click the "Shift summary" chip. A new `tools/call` for `get_shift_summary` appears at the end of the trace (the dashboard already called it once on page load, so older entries are above it). The dashboard shows both lines with status. | "Shift summary. The assistant calls one tool and reads back output against target. Line 2 is flagged behind." [On the seed data Line 1 shows "at risk", so do not say both are behind.] | click chip "Shift summary" (sends `shift summary`) |
+| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server with eight tools. The sidebar shows the negotiated protocol version. The trace drawer shows the real messages." | none |
+| 0:30 - 0:48 | Click the "Shift summary" button. A new `tools/call` for `get_shift_summary` appears at the end of the trace (the dashboard already called it once on page load, so older entries are above it). The dashboard shows both lines with status. | "Shift summary. The assistant calls one tool and reads back output against target. Line 2 is flagged behind." [On the seed data Line 1 shows "at risk", so do not say both are behind.] | click button "Shift summary" (sends `shift summary`) |
 | 0:48 - 1:08 | Type in the box and press Send. Trace shows `create_handover_note`, then a `list_handover_notes` call from the dashboard refresh. The new note appears in the dashboard Handover notes list. | "Now a handover note, saved through a tool call." | `add handover note for line 2: sealer jaw ran hot again at 14:00, heater band swapped` |
 | 1:08 - 1:25 | Type and Send. Trace shows `create_follow_up`, then a `list_follow_ups` call from the dashboard refresh. Dashboard Open follow-ups now has three entries. | "And a follow-up with an owner and a due date." | `add follow-up: re-check the guard, owner Asha, due 2026-10-24, line 2` |
 | 1:25 - 1:40 | Type and Send. Reply shows the heater band as out of stock with a suggested order quantity. | "Stock check. Out of stock, with a suggested order quantity and lead time." | `stock of heater band` |
-| 1:40 - 2:00 | Click the "Container load" chip. Trace shows `plan_container_load`. The Container load panel fills in. | "Container loading. This tool calls a separate open source package I published, which gives the count and says whether geometry or payload is the limit." | click chip "Container load" (sends `how many 600x400x300 12kg boxes fit in a 20ft container`) |
+| 1:40 - 2:00 | Click the "Container load" button. Trace shows `plan_container_load`. The Container load panel fills in. | "Container loading. This tool calls a separate open source package I published, which gives the count and says whether geometry or payload is the limit." | click button "Container load" (sends `how many 600x400x300 12kg boxes fit in a 20ft container`) |
 | 2:00 - 2:25 | Cut to the terminal. Press Ctrl+C in the server terminal, then run `npm run dev:server` again. Cut back to the browser, reload the page, wait for the connected line. The trace now shows only the new session (`initialize`, `tools/list` and the dashboard's calls). Then type the two requests. The new note and the new follow-up are listed. | "Persistence. I stop the server and start it again. The data is in SQLite, so the note and the follow-up are still there. The trace history is gone, because it only lives in server memory, but the data is not." | in terminal: Ctrl+C, then `npm run dev:server`. In the browser, reload, then type `list handover notes` and `open follow-ups` |
 | 2:25 - 2:40 | Plain title card (solid background, text only): `LineLedger`, `github.com/TXC2HYDRA/lineledger-mcp`, `MIT license`, `Synthetic demo data`. Do not show a GitHub page, it carries a logo. | "LineLedger is open source under the MIT license. The repository is on the screen. All data you saw is synthetic, and this is a simulation, not a live factory." | none |
 
