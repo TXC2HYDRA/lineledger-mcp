@@ -2,7 +2,7 @@
 
 Default model: local Ollama, loopback only, no cloud (D4).
 Opt-in: LINELEDGER_MODEL_PROVIDER=bedrock uses Amazon Nova on Amazon Bedrock through the project-only AWS
-profile (D5). Any other model id, provider or AWS profile is refused at startup.
+profile (D11). Any other model id, provider or AWS profile is refused at startup.
 """
 import json
 import os
@@ -100,7 +100,7 @@ def build_model(provider: str, model_id: str, ollama_host: str = OLLAMA_HOST, re
 
 
 def assert_model_allowed(model) -> None:
-    """Startup assertion (D4, D5): a bare Agent() would build a Bedrock model with a Claude model id."""
+    """Startup assertion (D4, D11): a bare Agent() would build a Bedrock model with a Claude model id."""
     if isinstance(model, OllamaModel):
         return
     if isinstance(model, BedrockModel):

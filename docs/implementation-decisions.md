@@ -57,6 +57,21 @@ request; GET and DELETE on `/mcp` return 405. Persistent state lives in SQLite, 
 Reasons: simplest for a single-process demo, and the stateful path has an open client gotcha
 (no re-initialize after a 404, issue #1708). `scripts/mcp-preflight.ts` is written to this pattern.
 
+**Superseded on 2026-10-23 by D2b.** Stateless stays available as `LINELEDGER_MCP_MODE=stateless`.
+
+## D2b. Stateful Streamable HTTP with server push (2026-10-23)
+
+One `McpServer` and one `StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID })` per MCP
+session, kept in an in-memory registry (`SessionRegistry` in `server/app.ts`). `initialize` without a
+session id creates a session; POST, GET (event stream) and DELETE with `Mcp-Session-Id` are routed to it;
+a missing id gets 400, an unknown one 404. Sessions idle for 30 minutes are closed; past 100 sessions the
+least recently used one is closed. Reasons: the production-line simulation (D13) changes every second,
+and a session is what lets the server push `notifications/resources/updated` for subscribed resources
+instead of the page polling. Data still lives in the store, not in sessions.
+The client gotcha noted in D2 (no re-initialize after a 404, issue #1708) is handled on our side: the web
+client (`web/src/mcp.ts`) and the agent (`AgentRunner` in `agent/service.py`) open a new session and retry
+once. Cost: sessions are per process, so no scale-out or serverless deploy in this mode.
+
 ## D3. Browser client
 
 Serve the web client and proxy `/mcp` through the same origin (Vite proxy) to avoid CORS.
@@ -152,6 +167,26 @@ controls. See `docs/ui-spec.md`.
   employer-linked account, so `gh repo create` is not used. The repository is created under TXC2HYDRA and
   pushed over SSH with the personal key.
 - `LICENSE` is MIT with holder "LineLedger contributors". Replace with a legal name if wanted.
+
+## D11. Optional Amazon Bedrock model for the agent (2026-10-22)
+
+`LINELEDGER_MODEL_PROVIDER=bedrock` builds a Strands `BedrockModel` with an Amazon Nova model only, through
+the project-only profile in `~/.aws-lineledger/`. Ollama stays the default. Details and guards:
+`docs/aws-integration-plan.md`, `agent/guard.py`.
+
+## D12. Store interface; optional Amazon DynamoDB store (2026-10-22)
+
+The tools call an async `Store` (`server/store.ts`) with a SQLite implementation (default) and a DynamoDB
+one (`LINELEDGER_STORE=dynamodb`, one provisioned 5/5 table). Every server test runs on both.
+
+## D13. Production-line simulation (2026-10-23)
+
+`server/sim.ts`: two serial lines of three stations, seeded random faults with exponential time between
+failures, repairs after a randomised repair time, a part-dependent fault (heater band), material drawn
+from stock per unit, operator start and stop, shifts A and B in plant time. It writes finished shifts and
+stock levels to the store, so the existing tools see its output. One queue serialises simulation ticks and
+tool calls. Reasons: a live system gives the MCP server something to report and control, and makes the
+stateful push (D2b) visible. It is a teaching model, not a digital twin.
 
 ## Open VERIFY list
 

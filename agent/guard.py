@@ -1,8 +1,8 @@
-"""Guards for the Strands agent (decisions D4 and D5).
+"""Guards for the Strands agent (decisions D4 and D11).
 
 Default provider "ollama": never reach AWS, never leave loopback (D4, unchanged).
 Opt-in provider "bedrock" (LINELEDGER_MODEL_PROVIDER=bedrock): Amazon Nova on Bedrock only, through the
-project-only AWS profile in ~/.aws-lineledger/, never the machine's default ~/.aws profile (D5).
+project-only AWS profile in ~/.aws-lineledger/, never the machine's default ~/.aws profile (D11).
 """
 import os
 import re
