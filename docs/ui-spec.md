@@ -68,11 +68,11 @@ Translucent surfaces, worst case. "Page glow" is text placed directly on the pag
 | warning | 7.83 | 9.84 | 7.85 | 9.21 | 8.67 |
 | danger | 5.17 | 6.51 | 5.19 | 6.09 | 5.73 |
 
-Dark label (`--color-bg`) on accent fill: 6.9 or better. All 146 pairs pass (both themes): text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
+Dark label (`--color-bg`) on accent fill: 6.9 or better. All 194 pairs pass (both themes): text 4.5:1, boundaries and focus ring 3:1. `--color-border-strong` is at least 3.5 on every surface above.
 
 ### Light theme
 
-Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light: glass 48%, sheen 22% white, lift 5% black, pill 90%, drawer 94%.
+Same token names, overridden under `[data-theme="light"]`: bg `#F3F3F6`, surface `#FFFFFF`, raised `#ECECF1`, border `#D5D5DD`, border-strong `#6E6E7A`, text `#131316`, muted `#484853`, accent and focus `#B03A06`, success `#046045`, warning `#8A5100`, danger `#B42318`. Glass on light is frosted, after a warm blurred-glass reference: glass fill 42%, blur 28 px with 160% saturation, a bright 65% white rim, a warm soft shadow with a faint 1 px outline, whiter controls and rows (lift 45% white), sheen 22% white, pill 90%, drawer 94%, and larger radii (card 18 px, panel 26 px). The light page is a smooth blend of three warm colours with no shapes (`--mesh-a` `#FFD9BA`, `--mesh-b` `#FFE6C7`, `--mesh-c` `#FBD8C6`); dark keeps its plain background. The contrast check tests text on each mesh colour and on glass over each. 
 
 The theme is set before first paint from the saved choice (`localStorage`, wrapped in try/catch), else the system preference. The toggle sits at the right of the top bar (`aria-pressed`, `aria-label`). `npm run check:contrast` checks both themes against their own worst-case surfaces; on light it assumes dense text covers 40% of the area behind the pill and drawer.
 
@@ -82,10 +82,10 @@ The sidebar toggle (top bar, left) switches between two layouts built from the s
 
 | Sidebar | Layout | What it is |
 |---|---|---|
-| Open (default) | `data-layout="scroll"` | One long page: hero and line cards, output and trend charts, then a full-size Assistant, Follow-ups, Handover and Container load section, then the trace tile. The forms, the Open/Closed/All filter and the chat example chips are shown, and lists are not truncated. |
+| Open (default) | `data-layout="scroll"` | One long page: hero and line cards, output and trend charts, then an Assistant section whose chat starts small and grows with the conversation up to one screen (then the transcript scrolls), and full-size Follow-ups, Handover and Container load sections, then the trace tile. The forms, the Open/Closed/All filter and the chat example chips are shown, and lists are not truncated. |
 | Closed | `data-layout="compact"` | The one-screen dashboard. A small "SYNTHETIC DEMO DATA" chip with a connection dot appears in the top bar so the notice is never hidden. |
 
-Sidebar links (open layout): Home, Assistant, Follow-ups, Handover and Container load scroll their section to the top with an eased scroll of 0.8 to 1.8 s (instant under `prefers-reduced-motion`). The active link and the breadcrumb follow the scroll position (scroll-spy) and the last link stays current at the end of the page. Each tool section is about one screen tall, so every link can bring its section to the top. MCP trace still opens the drawer. Sending a request from the top bar scrolls to Assistant, where the answer appears.
+Sidebar links (open layout): Home, Assistant, Follow-ups, Handover and Container load scroll their section to the top with an eased scroll of 0.8 to 1.8 s (instant under `prefers-reduced-motion`). The active link and the breadcrumb follow the scroll position (scroll-spy) and the last link stays current at the end of the page. The form sections are about one screen tall, so their links can bring them to the top. MCP trace still opens the drawer. Sending a request from the top bar scrolls to Assistant, where the answer appears.
 
 Transitions are deliberately slow. The sidebar slides and fades over 900 ms while the grid column closes. The content fades out (500 ms), switches layout while hidden, then fades in (500 ms). A second toggle press during the switch is ignored. A closed sidebar is `visibility: hidden` after the slide, so it leaves the tab order. Below 1100 px the sidebar is a top block that collapses by height instead of sliding sideways.
 ## Layout
