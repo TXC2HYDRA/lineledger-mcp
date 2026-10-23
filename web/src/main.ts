@@ -414,10 +414,7 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
       addMessage('LineLedger', `Agent model unavailable: ${errorText(e)}. Answering with the rule-based planner instead.`, 'error')
     }
     if (answer) {
-      const tools = answer.tool_calls.map((c) => c.name).join(', ') || 'none'
-      const where = answer.provider === 'bedrock' ? 'Amazon Bedrock' : answer.fallback ? 'local model (fallback from Bedrock)' : 'local model'
-      const tokens = answer.usage ? ` · ${answer.usage.totalTokens} tokens` : ''
-      addMessage('LineLedger', `${answer.reply}\n[${where} ${answer.model} · ${answer.seconds} s${tokens} · tools: ${tools}]`)
+      addMessage('LineLedger', answer.reply) // the model, tokens and tools are in the agent's log and the MCP trace
       void refreshAll()
       finish(answer.reply, fromVoice)
       busy = false
