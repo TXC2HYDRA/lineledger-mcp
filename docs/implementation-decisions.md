@@ -70,7 +70,10 @@ and a session is what lets the server push `notifications/resources/updated` for
 instead of the page polling. Data still lives in the store, not in sessions.
 The client gotcha noted in D2 (no re-initialize after a 404, issue #1708) is handled on our side: the web
 client (`web/src/mcp.ts`) and the agent (`AgentRunner` in `agent/service.py`) open a new session and retry
-once. Cost: sessions are per process, so no scale-out or serverless deploy in this mode.
+once. A note or follow-up written in one session is also announced to every other session as a logging notice
+(`data_changed`, with the resource name), so a second tab refreshes its lists without polling; `server/sessions.ts`
+from the earlier opt-in design (`LINELEDGER_STATEFUL=1`) was dropped in favour of this registry.
+Cost: sessions are per process, so no scale-out or serverless deploy in this mode.
 
 ## D3. Browser client
 

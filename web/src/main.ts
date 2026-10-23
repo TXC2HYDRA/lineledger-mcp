@@ -389,7 +389,7 @@ async function startLive(enabled: boolean) {
 
 // ---- planner mode: deterministic rules (default) or the agent service (local Ollama or Amazon Bedrock) ----
 let modelMode = false
-type AgentReply = { reply: string; tool_calls: { name: string }[]; seconds: number; model: string; provider?: string; usage?: { totalTokens: number } | null }
+type AgentReply = { reply: string; tool_calls: { name: string }[]; seconds: number; model: string; provider?: string; fallback?: boolean; usage?: { totalTokens: number } | null }
 async function askAgent(text: string): Promise<AgentReply> {
   const res = await fetch('/agent/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) })
   const body = (await res.json().catch(() => ({}))) as Data
@@ -406,22 +406,23 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
   addMessage('You', text, 'user')
   if (modelMode) {
     setVoice('thinking', 'The agent model is working. A local model can take a while on CPU.')
+    let answer: AgentReply | undefined
     try {
-      const r = await askAgent(text)
-      const tools = r.tool_calls.map((c) => c.name).join(', ') || 'none'
-      const where = r.provider === 'bedrock' ? 'Amazon Bedrock' : 'local model'
-      const tokens = r.usage ? ` · ${r.usage.totalTokens} tokens` : ''
-      addMessage('LineLedger', `${r.reply}\n[${where} ${r.model} · ${r.seconds} s${tokens} · tools: ${tools}]`)
-      void refreshAll()
-      finish(r.reply, fromVoice)
+      answer = await askAgent(text)
     } catch (e) {
-      const message = `Agent model unavailable: ${errorText(e)}. Switch the planner back to rules.`
-      addMessage('LineLedger', message, 'error')
-      setVoice('error', message)
-    } finally {
-      busy = false
+      // Last resort: the rule-based planner answers the same request, so the chat never ends in an error.
+      addMessage('LineLedger', `Agent model unavailable: ${errorText(e)}. Answering with the rule-based planner instead.`, 'error')
     }
-    return
+    if (answer) {
+      const tools = answer.tool_calls.map((c) => c.name).join(', ') || 'none'
+      const where = answer.provider === 'bedrock' ? 'Amazon Bedrock' : answer.fallback ? 'local model (fallback from Bedrock)' : 'local model'
+      const tokens = answer.usage ? ` · ${answer.usage.totalTokens} tokens` : ''
+      addMessage('LineLedger', `${answer.reply}\n[${where} ${answer.model} · ${answer.seconds} s${tokens} · tools: ${tools}]`)
+      void refreshAll()
+      finish(answer.reply, fromVoice)
+      busy = false
+      return
+    }
   }
   const p = plan(text)
   if (p.kind === 'help') {
@@ -742,10 +743,15 @@ themeBtn.addEventListener('click', () => {
 startTrace()
 void (async () => {
   try {
+    // Stateful server only: it pushes a notice when another session wrote a note or follow-up.
+    mcp.onChange = (resource) => {
+      if (resource === 'follow_ups') void refreshFollowUps()
+      if (resource === 'handover_notes') void refreshNotes()
+    }
     await mcp.connect()
     // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
-    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; simulation?: boolean }
-    const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ' · store: SQLite' : ''
+    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; degraded?: boolean; simulation?: boolean }
+    const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ` · store: SQLite${health.degraded ? ' (fallback)' : ''}` : ''
     const connText = () => `MCP connected · protocol ${mcp.protocolVersion} · ${mcp.sessionId ? `session ${mcp.sessionId.slice(0, 8)}` : 'stateless'}${store}`
     const showSession = () => {
       setConn('connected', connText())

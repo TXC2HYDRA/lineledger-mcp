@@ -1,5 +1,7 @@
 // Server-side trace tap: every JSON-RPC message in and out of /mcp is recorded here and
 // streamed to the UI, so the trace panel can only show traffic that really happened.
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+
 export interface TraceEntry {
   id: number
   ts: string
@@ -29,5 +31,14 @@ export class TraceTap {
   subscribe(listener: (entry: TraceEntry) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+}
+
+/** Record every message a transport sends. Inbound messages are recorded by the route that parses them. */
+export function traceSends(transport: { send: (message: JSONRPCMessage, options?: any) => Promise<void> }, trace: TraceTap) {
+  const send = transport.send.bind(transport)
+  transport.send = (message, options) => {
+    trace.record('out', message)
+    return send(message, options)
   }
 }

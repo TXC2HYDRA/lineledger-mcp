@@ -2,7 +2,7 @@ import { request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
+import { LoggingMessageNotificationSchema, ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp, type AppOptions } from '../server/app.js'
 import { applyPlantSeed } from '../server/plant.js'
@@ -88,7 +88,7 @@ describe('protocol', () => {
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: false, sessions: 0 })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, degraded: false, mcp: 'stateful', simulation: false, sessions: 0 })
     await connect()
     expect(await (await fetch(`${url}/api/health`)).json()).toMatchObject({ sessions: 1 })
   })
@@ -187,6 +187,21 @@ describe('stateful sessions', () => {
     await sim!.advance(60_000)
     await new Promise((r) => setTimeout(r, 300))
     expect(seen).toEqual([])
+  })
+
+  it('tells the other sessions when a note or follow-up is written', async () => {
+    const watcher = await connect()
+    const seen: { event: string; resource: string }[] = []
+    watcher.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => void seen.push(n.params.data as { event: string; resource: string }))
+    const writer = await connect()
+    await new Promise((r) => setTimeout(r, 200)) // the GET event stream opens after initialize
+    await call(writer.client, 'create_follow_up', { title: 'Recheck guard', owner: 'Ravi' })
+    await call(writer.client, 'create_handover_note', { author: 'Test', text: 'Belt tension low' })
+    await call(writer.client, 'list_follow_ups', {}) // a read announces nothing
+    await expect.poll(() => seen, { timeout: 3000 }).toEqual([
+      { event: 'data_changed', resource: 'follow_ups' },
+      { event: 'data_changed', resource: 'handover_notes' },
+    ])
   })
 
   it('still serves every tool in the optional stateless mode', async () => {

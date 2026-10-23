@@ -9,13 +9,13 @@ import {
   McpError,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
-  type JSONRPCMessage,
 } from '@modelcontextprotocol/sdk/types.js'
+import { noNotifier, type Notifier } from './notify.js'
 import type { FactorySim } from './sim.js'
 import type { Store } from './store.js'
-import { registerTools } from './tools.js'
+import { registerTools, type ChangeResource } from './tools.js'
 import { PLANT_RESOURCES, registerPlantResources, registerSimTools, SNAPSHOT_URI } from './tools-sim.js'
-import { TraceTap } from './trace.js'
+import { TraceTap, traceSends } from './trace.js'
 
 export type McpMode = 'stateful' | 'stateless'
 
@@ -23,6 +23,8 @@ export interface AppOptions {
   store: Store
   /** The plant simulation (plant profile). Without it the simulation tools and the snapshot resource are not offered. */
   sim?: FactorySim
+  /** Alerts for new follow-ups (SNS or local files). Default: none. */
+  notifier?: Notifier
   trace?: TraceTap
   /** Browser origins allowed to call the server. Requests without an Origin header (non-browser clients) pass. */
   allowedOrigins: string[]
@@ -88,6 +90,10 @@ export class SessionRegistry {
     this.sessions.delete(id)
   }
 
+  all(): Session[] {
+    return [...this.sessions.values()]
+  }
+
   subscribers(uri: string): Session[] {
     return [...this.sessions.values()].filter((s) => s.subscriptions.has(uri))
   }
@@ -109,6 +115,7 @@ const rpcError = (res: Response, status: number, code: number, message: string) 
 export function createApp({
   store,
   sim,
+  notifier = noNotifier,
   trace = new TraceTap(),
   allowedOrigins,
   mode = 'stateful',
@@ -132,12 +139,20 @@ export function createApp({
   })
   app.use(express.json({ limit: '64kb' }))
 
+  // A note or follow-up written in one session tells every session (logging notice "data_changed"), so a second
+  // tab refreshes its lists without a click. Stateful mode only.
+  const broadcast = (resource: ChangeResource) => {
+    for (const s of sessions.all()) {
+      s.server.sendLoggingMessage({ level: 'info', logger: 'lineledger', data: { event: 'data_changed', resource } }).catch(() => undefined)
+    }
+  }
+
   const buildServer = (subscriptions?: Set<string>) => {
     const server = new McpServer(
       { name: 'lineledger', version: '0.2.0' },
-      subscriptions && sim ? { capabilities: { resources: { subscribe: true, listChanged: true } } } : undefined,
+      subscriptions ? { capabilities: { logging: {}, ...(sim && { resources: { subscribe: true, listChanged: true } }) } } : undefined,
     )
-    registerTools(server, store, sim)
+    registerTools(server, store, sim, notifier, subscriptions ? broadcast : undefined)
     if (sim) {
       registerSimTools(server, sim)
       registerPlantResources(server, sim)
@@ -156,13 +171,6 @@ export function createApp({
     return server
   }
 
-  const tap = (transport: StreamableHTTPServerTransport) => {
-    const send = transport.send.bind(transport)
-    transport.send = (message: JSONRPCMessage, options) => {
-      trace.record('out', message)
-      return send(message, options)
-    }
-  }
   const traceInbound = (body: unknown) => {
     for (const message of Array.isArray(body) ? body : [body]) trace.record('in', message)
   }
@@ -173,7 +181,7 @@ export function createApp({
       const server = buildServer()
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
       traceInbound(req.body)
-      tap(transport)
+      traceSends(transport, trace)
       res.on('close', () => {
         void transport.close()
         void server.close()
@@ -230,7 +238,7 @@ export function createApp({
         transport.onclose = () => {
           if (transport.sessionId) sessions.forget(transport.sessionId)
         }
-        tap(transport)
+        traceSends(transport, trace)
         await server.connect(transport)
         await transport.handleRequest(req, res, req.body)
       } catch {
@@ -272,7 +280,7 @@ export function createApp({
   }
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, mcp: mode, simulation: sim !== undefined, sessions: sessions.size })
+    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, degraded: store.degraded ?? false, mcp: mode, simulation: sim !== undefined, sessions: sessions.size })
   })
   app.get('/api/trace', (req, res) => {
     res.json({ entries: trace.list(Number(req.query.since) || 0) })

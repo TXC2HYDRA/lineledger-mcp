@@ -88,3 +88,11 @@ Each is taken from the friction log (`docs/friction-log.md`). Priority is our ow
    - Workaround: use a non-thinking model (`qwen3:4b-instruct`).
    - Suggestion: a warning from the provider, and docs listing which models honour the option.
    - Priority: Important (it looks like a model bug and costs hours).
+
+6. **Re-initialize after a 404 on a dropped session**
+   - Task: run an optional stateful server and keep the browser client working after a server restart.
+   - Expected: the client starts a new session when the server answers 404 for its session id.
+   - Actual: every later call failed with `StreamableHTTPError` 404 (SDK 1.32.1).
+   - Workaround: reconnect once and retry in our own wrapper (`web/src/mcp.ts`).
+   - Suggestion: re-initialize in the transport or client when a session id was in use, or offer an option.
+   - Priority: Important (the transport spec requires this behaviour, and the failure is silent until the page is reloaded).

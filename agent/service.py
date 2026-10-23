@@ -43,6 +43,9 @@ PORT = int(os.environ.get("AGENT_PORT", "8788"))
 MAX_TOKENS = 512
 # Each tool call costs one more model call. Our requests need one tool, so 4 calls leaves room for a retry
 # and still bounds a runaway tool loop (CPU time locally, tokens on Bedrock).
+# Bedrock turns that fail (no network, throttling, expired credentials) are answered by the local Ollama
+# model instead. LINELEDGER_FALLBACK=off disables this. Ollama stays loopback only (D4).
+FALLBACK = os.environ.get("LINELEDGER_FALLBACK", "on").strip().lower() != "off"
 MAX_MODEL_CALLS = int(os.environ.get("LINELEDGER_MAX_MODEL_CALLS", "4"))
 
 SYSTEM_PROMPT = (
@@ -151,8 +154,9 @@ def session_lost(agent: Agent) -> bool:
 class AgentRunner:
     """Owns the agent and its MCP session. One request at a time; a lost session is rebuilt and retried once."""
 
-    def __init__(self, factory=None) -> None:
+    def __init__(self, factory=None, provider: str = PROVIDER) -> None:
         self.factory = factory or build_agent
+        self.provider = provider
         self.lock = threading.Lock()
         self.agent = self.factory()
         self.last_used = time.monotonic()
@@ -173,13 +177,23 @@ class AgentRunner:
                 self.rebuild()
             for attempt in (1, 2):
                 self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
-                result = self.agent(text)
-                if attempt == 1 and session_lost(self.agent):
+                result, used, provider = ask_with_fallback(self.agent, text, self.provider, self._fallback)
+                if used is self.agent and attempt == 1 and session_lost(self.agent):
                     self.rebuild()
                     continue
                 break
             self.last_used = time.monotonic()
-            return result, tool_calls(self.agent, 0)
+            calls = tool_calls(used, 0)
+            if used is not self.agent:
+                try:
+                    used.cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
+            return result, calls, provider
+
+    @staticmethod
+    def _fallback() -> Agent:
+        return build_agent(provider="ollama")
 
 
 def tool_calls(agent: Agent, since: int) -> list[dict]:
@@ -198,6 +212,19 @@ def turn_usage(result) -> dict | None:
     if not usage:
         return None
     return {k: int(usage.get(k, 0)) for k in ("inputTokens", "outputTokens", "totalTokens")}
+
+
+def ask_with_fallback(agent: Agent, text: str, provider: str, build_fallback):
+    """Returns (result, agent_used, provider_used). A failed bedrock turn is retried on a local Ollama agent."""
+    try:
+        return agent(text), agent, provider
+    except Exception as error:
+        if provider != "bedrock" or not FALLBACK:
+            raise
+        print(f"bedrock turn failed ({type(error).__name__}); answering with local Ollama", file=sys.stderr, flush=True)
+        fallback = build_fallback()
+        fallback.messages.clear()
+        return fallback(text), fallback, "ollama"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -227,21 +254,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": 'expected JSON {"text": "..."}'})
         started = time.monotonic()
         try:
-            result, calls = self.runner.answer(text)
+            result, calls, provider = self.runner.answer(text)
         except Exception as error:  # surface model/connection errors to the UI, never fake success
             return self._send(502, {"error": f"{type(error).__name__}: {error}"})
         body = {
             "reply": str(result).strip(),
             "tool_calls": calls,
             "seconds": round(time.monotonic() - started, 1),
-            "provider": PROVIDER,
-            "model": MODEL_ID,
+            "provider": provider,
+            "model": MODEL_ID if provider == PROVIDER else OLLAMA_MODEL,
+            "fallback": provider != PROVIDER,
             "usage": turn_usage(result),
         }
         # Per-turn token log (cost evidence for the bedrock provider). No prompt text, no credentials.
         print(json.dumps({"turn": {k: body[k] for k in ("provider", "model", "seconds", "usage")},
                           "tools": [c["name"] for c in body["tool_calls"]]}), file=sys.stderr, flush=True)
         self._send(200, body)
+
+    @classmethod
+    def _fallback(cls) -> Agent:
+        if cls.fallback_agent is None:
+            cls.fallback_agent = build_agent(provider="ollama")
+        return cls.fallback_agent
 
     def log_message(self, fmt, *args):  # quiet
         pass

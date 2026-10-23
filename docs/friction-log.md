@@ -98,3 +98,13 @@ Real observations from building LineLedger. Each entry has the fields the hackat
 - Severity: Medium. A prompt change that fixed one prompt broke another, so 7 of 10 prompts stayed correct across runs.
 - Workaround: the tool now also accepts a flat form (`container_type` 20ft/40ft plus `box_length_mm`, `box_width_mm`, `box_height_mm`, `box_weight_kg`). This fixed the container prompt. The shift date problem remains.
 - Suggestion: tool authors should prefer flat, enum-based arguments for small models. A way to give examples inside a tool schema would help.
+
+## 11. The SDK client does not start a new session after a 404
+
+- Task: add an optional stateful mode (sessions) to the server and keep the browser working across a server restart.
+- Steps: initialize a session with `Client` and `StreamableHTTPClientTransport` (SDK 1.32.1), drop the session on the server (DELETE), then call a tool twice.
+- Expected: the client sees 404 for its session id and starts a new session, as the 2025-11-25 transport spec describes under Session Management.
+- Actual: both calls failed with `StreamableHTTPError` code 404 ("Session not found"). The client kept sending the dead session id.
+- Severity: Medium. In stateful mode a server restart leaves every open page broken until it reloads.
+- Workaround: `web/src/mcp.ts` catches the 404 (and a failed fetch on a dead socket), reconnects with a new `Client`, retries once, and shares one reconnect between concurrent calls. Covered by `tests/stateful.test.ts`.
+- Suggestion: have the transport or client re-initialize on 404 when a session id was in use, or expose an option for it.

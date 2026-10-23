@@ -16,6 +16,7 @@
     "noEmit": true
   },
   "include": [
+    "lambda/**/*.ts",
     "scripts/**/*.ts",
     "server/**/*.ts",
     "tests/**/*.ts",

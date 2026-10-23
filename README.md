@@ -125,6 +125,7 @@ Where `@modelcontextprotocol/sdk` 1.32.1 is imported and called at runtime:
 | `scripts/mcp-preflight.ts` | Starts a minimal one-tool (`ping`) server on an ephemeral port, separate from the LineLedger server, and runs `initialize`, `tools/list` and `tools/call` through the SDK client. It checks the SDK and protocol version, not the LineLedger tools. |
 | `web/src/mcp.ts` (sessions) | The browser keeps its session, subscribes to the factory resources and reconnects once if the server answers 404 for an ended session. |
 | `tests/server.test.ts` | A real SDK client talks to the server over HTTP: sessions, push notifications, every tool. |
+| `tests/web-client.test.ts` | The browser client against the optional stateless server: no session, no reconnect. |
 
 Transport behaviour: **stateful** Streamable HTTP. `initialize` creates a session and returns its
 `Mcp-Session-Id`; later POSTs, the `GET /mcp` event stream (server push) and `DELETE /mcp` (end of session)
@@ -145,6 +146,10 @@ repairs a line.
 Resource (subscribable, plant profile): `plant://snapshot`, the whole live plant in one JSON document.
 When the simulation changes, subscribed sessions get `notifications/resources/updated` (at most once a
 second) and read it again; the trace shows each push followed by the `resources/read`.
+
+When one session creates a handover note or a follow-up or closes a follow-up, the server also sends a
+`data_changed` logging notice to every session, so a second browser tab refreshes its lists without a click.
+After a server restart the old session id gets a 404; the browser client opens a new session and retries once.
 
 ## Architecture
 
@@ -186,7 +191,7 @@ the rule-based planner.
 
 ```bash
 python3 -m venv .venv && .venv/bin/python -m pip install -r agent/requirements.txt
-npm run test:agent       # 15 tests: AWS env scrub, explicit model, Nova-only and profile guards, loopback-only,
+npm run test:agent       # 18 tests: AWS env scrub, explicit model, Nova-only and profile guards, loopback-only,
                          # model-call cap, MCP tool discovery, reconnect after a server restart. No AWS call.
 ```
 
@@ -210,11 +215,33 @@ example "Run against Amazon Bedrock (Nova Lite, us-east-1) and a DynamoDB table 
 |---|---|---|---|
 | Amazon Bedrock, Amazon Nova Lite | The agent's model, through the Strands Agents SDK `BedrockModel` and the Converse API | `LINELEDGER_MODEL_PROVIDER=ollama` / `bedrock` | `agent/service.py` (`build_model`), `agent/guard.py` |
 | Amazon DynamoDB | Notes, follow-ups, shift output, stock and id counters in one table | `LINELEDGER_STORE=sqlite` / `dynamodb` | `server/store-dynamodb.ts`, `server/store.ts` |
+| Amazon SNS | Email alert when a follow-up is created | `LINELEDGER_NOTIFY=none` / `sns` (+ `LINELEDGER_SNS_TOPIC_ARN`) | `server/notify.ts` |
+| Amazon EventBridge + AWS Lambda + SNS | Scheduled shift report (line status, stock to reorder, overdue follow-ups) by email at the end of each shift | `infra/shift-report.yaml`, deployed by `scripts/deploy-report.sh` | `lambda/shift-report.ts`, `server/report.ts` |
 
 Other switches: `LINELEDGER_BEDROCK_MODEL` (default `us.amazon.nova-lite-v1:0`, must start with
 `amazon.nova-` or `us.amazon.nova-`), `LINELEDGER_AWS_REGION` (default `us-east-1`),
 `LINELEDGER_DYNAMODB_TABLE` (default `lineledger`), `LINELEDGER_DYNAMODB_ENDPOINT` (DynamoDB Local, loopback
 only).
+
+Not used on purpose: SQS (nothing slow to queue yet), DynamoDB Streams (the server publishes its own
+events, and the table keeps streams off), Kinesis, Amazon MQ and ElastiCache (no workload for them).
+
+### Fallbacks to self-hosted services
+
+An AWS outage, missing credentials or a throttled model never ends in an error page. Each AWS piece has a
+self-hosted twin that takes over by itself (`LINELEDGER_FALLBACK=off` turns them all off):
+
+| AWS piece | Falls back to | How |
+|---|---|---|
+| DynamoDB store | SQLite file (`LINELEDGER_DB`) | `server/store-fallback.ts`: a failed or slow call (8 s) is served by SQLite, DynamoDB is skipped for 30 s and then tried again. Also covers DynamoDB being down or misconfigured at startup. `/api/health` shows `degraded: true`, the page shows "SQLite (fallback)". |
+| SNS alerts | `LINELEDGER_NOTIFY=local`: JSONL file `LINELEDGER_ALERT_FILE` plus optional `LINELEDGER_WEBHOOK_URL` (ntfy, Mattermost, Slack-style) | `server/notify.ts`: a failed publish (5 s limit) goes to the local channel. |
+| Bedrock model | Local Ollama model (loopback only) | `agent/service.py` (`ask_with_fallback`): a failed Bedrock turn is retried on Ollama; the chat shows "local model (fallback from Bedrock)". |
+| Agent model, either kind | Rule-based planner | `web/src/main.ts`: if the agent service fails, the same request is answered by the rules. |
+| EventBridge + Lambda report | `npm run report` from cron | `scripts/shift-report.ts` builds the same digest and sends it through the configured notifier. Example: `0 6,14,22 * * * cd /path/to/repo && LINELEDGER_NOTIFY=local npm run report`. |
+
+Redis and Celery are not used: SQLite, a JSONL file and cron already cover these jobs without another
+server to run. While the primary store is down, new notes and follow-ups exist only in SQLite and the
+DynamoDB rows are not shown; the two stores are not synced (noted in `server/store-fallback.ts`).
 
 ### Safety rules in the code
 
@@ -252,9 +279,18 @@ LINELEDGER_MODEL_PROVIDER=bedrock npm run dev:agent          # Nova Lite in us-e
 .venv/bin/python scripts/agent_spike.py > spike-nova-lite.md # 10 prompts, graded by hand afterwards
 ```
 
-Teardown after judging: delete the table and the IAM user, check Billing shows no charge, delete
-`~/.aws-lineledger/`. The full plan, cost estimate and cut lines are in `docs/aws-integration-plan.md`.
+Alerts and the scheduled report (after the table exists; the deploying profile needs more rights than
+`docs/aws-iam-policy.json`, so use the account owner for this one command):
 
+```bash
+scripts/deploy-report.sh you@example.com                     # topic, Lambda, schedule (06:00, 14:00, 22:00 UTC)
+# confirm the subscription in the email AWS sends, then:
+aws lambda invoke --function-name lineledger-shift-report /dev/stdout
+LINELEDGER_NOTIFY=sns LINELEDGER_SNS_TOPIC_ARN=<TopicArn from the stack output> LINELEDGER_STORE=dynamodb npm run dev:server
+```
+
+Teardown after judging: `scripts/deploy-report.sh --delete`, delete the table and the IAM user, check Billing shows no charge, delete
+`~/.aws-lineledger/`. The full plan, cost estimate and cut lines are in `docs/aws-integration-plan.md`.
 ## End-to-end tests
 
 `npm run test:e2e` starts the real server in the plant profile (story day, seed 1, x120, in-memory SQLite)

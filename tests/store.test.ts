@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dynamoClientFromEnv, requireLoopbackEndpoint, requireProjectProfile } from '../server/store-dynamodb.js'
 import { openStore, storeKind, type Store } from '../server/store.js'
 import { DYNAMODB_ENDPOINT, HARNESSES } from './harness.js'
@@ -143,7 +143,14 @@ describe('store selection and AWS guards (no network)', () => {
     expect(() => dynamoClientFromEnv({ HOME: home })).toThrow(/AWS_PROFILE/)
     expect(() => dynamoClientFromEnv({ ...project, LINELEDGER_AWS_REGION: 'moon-1' })).toThrow(/Region/)
     expect(() => dynamoClientFromEnv({ ...project, LINELEDGER_DYNAMODB_TABLE: 'a b' })).toThrow(/table name/)
-    await expect(openStore({ LINELEDGER_STORE: 'dynamodb', HOME: home })).rejects.toThrow(/AWS_PROFILE/)
+    await expect(openStore({ LINELEDGER_STORE: 'dynamodb', LINELEDGER_FALLBACK: 'off', HOME: home })).rejects.toThrow(/AWS_PROFILE/)
+    // with the fallback on (default) the same misconfiguration is served from SQLite and reported as degraded
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fallback = await openStore({ LINELEDGER_STORE: 'dynamodb', LINELEDGER_DB: ':memory:', HOME: home })
+    expect(await fallback.lineExists('L1')).toBe(true)
+    expect(fallback.degraded).toBe(true)
+    await fallback.close()
+    log.mockRestore()
     const local = dynamoClientFromEnv({ LINELEDGER_DYNAMODB_ENDPOINT: 'http://127.0.0.1:8000' })
     expect(local.target).toBe('DynamoDB Local http://127.0.0.1:8000')
     expect(local.table).toBe('lineledger')

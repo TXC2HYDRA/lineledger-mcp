@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
+import { LoggingMessageNotificationSchema, ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 
 export type ToolResult = {
   isError?: boolean
@@ -23,6 +23,8 @@ export class McpConnection {
   private readonly watchers = new Map<string, () => void>()
   protocolVersion: string | undefined
   sessionId: string | undefined
+  /** Called when another session wrote a note or follow-up ("data_changed" logging notice). */
+  onChange: (resource: string) => void = () => {}
   /** Called after a lost session was replaced by a new one. */
   onReconnect: (() => void) | undefined
   /** When the page last heard from the server: a reply or a push. */
@@ -30,14 +32,22 @@ export class McpConnection {
   /** True after a reconnect failed (the server was down), so the next call tries again. */
   private stale = false
   private reopening: Promise<void> | undefined
+  private baseUrl = ''
 
-  async connect(): Promise<void> {
+  /** `baseUrl` is the page address by default; the tests pass the server's. */
+  async connect(baseUrl: string = location.href): Promise<void> {
+    this.baseUrl = baseUrl
     this.client = new Client({ name: 'lineledger-web', version: '0.2.0' })
     this.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => {
       this.lastHeard = Date.now()
       this.watchers.get(n.params.uri)?.()
     })
-    this.transport = new StreamableHTTPClientTransport(new URL('/mcp', location.href))
+    this.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => {
+      this.lastHeard = Date.now()
+      const data = n.params.data as { event?: string; resource?: string } | undefined
+      if (data?.event === 'data_changed' && data.resource) this.onChange(data.resource)
+    })
+    this.transport = new StreamableHTTPClientTransport(new URL('/mcp', baseUrl))
     await this.client.connect(this.transport)
     this.protocolVersion = this.transport.protocolVersion
     this.sessionId = this.transport.sessionId
@@ -50,7 +60,7 @@ export class McpConnection {
     this.reopening ??= (async () => {
       try {
         await this.client.close().catch(() => undefined)
-        await this.connect()
+        await this.connect(this.baseUrl)
         this.onReconnect?.()
       } catch (error) {
         this.stale = true

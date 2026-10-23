@@ -1,4 +1,5 @@
 import { createApp, type McpMode } from './app.js'
+import { openNotifier } from './notify.js'
 import { applyPlantSeed } from './plant.js'
 import { FactorySim } from './sim.js'
 import { openStore } from './store.js'
@@ -19,6 +20,8 @@ if (plant && !process.env.LINELEDGER_DB) process.env.LINELEDGER_DB = 'data/plant
 
 // LINELEDGER_STORE=sqlite (default, LINELEDGER_DB file) or dynamodb (see server/store-dynamodb.ts).
 const store = await openStore(process.env)
+// LINELEDGER_NOTIFY=none (default), local or sns (see server/notify.ts).
+const notifier = openNotifier(process.env)
 
 let sim: FactorySim | undefined
 if (plant) {
@@ -38,11 +41,11 @@ if (plant) {
   sim.start({ speed, holds: process.env.LINELEDGER_SIM_HOLDS === 'on' })
 }
 
-const app = createApp({ store, sim, allowedOrigins, mode })
+const app = createApp({ store, sim, notifier, allowedOrigins, mode })
 // Bind to loopback only.
 const http = app.listen(port, '127.0.0.1', () => {
   const simText = sim ? `Tarnby Works plant simulation, sim clock ${sim.snapshot().sim_clock.sim_now}` : 'seed data, no simulation'
-  console.log(`LineLedger MCP server (synthetic demo data, store: ${store.kind}, ${mode}, ${simText}) on http://127.0.0.1:${port}/mcp`)
+  console.log(`LineLedger MCP server (synthetic demo data, store: ${store.kind}, alerts: ${notifier.kind}, ${mode}, ${simText}) on http://127.0.0.1:${port}/mcp`)
 })
 
 // Save the simulation's stock levels and close MCP sessions before exit.

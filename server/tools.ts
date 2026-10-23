@@ -3,6 +3,8 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { planContainerLoad } from 'container-load-planner'
 import * as z from 'zod/v4'
 import type { FactorySim } from './sim.js'
+import { noNotifier, type Notifier } from './notify.js'
+import { lineStatus, stockStatus } from './rules.js'
 import type { Store } from './store.js'
 
 const ok = (data: Record<string, unknown>): CallToolResult => ({
@@ -33,8 +35,17 @@ const followUpShape = {
   closed_at: z.string().nullable(),
 }
 
+/** What a write tool changed. Stateful mode pushes this to every connected session. */
+export type ChangeResource = 'follow_ups' | 'handover_notes'
+
 /** `sim` (plant profile only) adds live data: the in-progress shift's counts and pace, and days of stock cover. */
-export function registerTools(server: McpServer, store: Store, sim?: FactorySim): void {
+export function registerTools(
+  server: McpServer,
+  store: Store,
+  sim?: FactorySim,
+  notifier: Notifier = noNotifier,
+  onChange: (resource: ChangeResource) => void = () => {},
+): void {
   server.registerTool(
     'get_shift_summary',
     {
@@ -76,7 +87,6 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
       const latest = { shift_date: found.shift_date, shift: found.shift }
       const rows = await store.shiftLines(latest.shift_date, latest.shift)
       const pct = (produced: number, target: number) => (target > 0 ? Math.round((produced / target) * 1000) / 10 : 100)
-      const statusOf = (p: number) => (p >= 95 ? ('on_track' as const) : p >= 80 ? ('at_risk' as const) : ('behind' as const))
       // The shift in progress: the store row lags up to 15 simulated minutes, so live counts replace it.
       const live = sim?.liveShift()
       const inProgress = live !== undefined && live.shift_date === latest.shift_date && live.shift === latest.shift
@@ -94,7 +104,7 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
           produced_units: produced,
           percent_of_target: pct(produced, r.target_units),
           downtime_min: now?.downtime_min ?? r.downtime_min,
-          status: stoppedLong ? ('behind' as const) : statusOf(now ? pace : pct(produced, r.target_units)),
+          status: stoppedLong ? ('behind' as const) : lineStatus(now ? pace : pct(produced, r.target_units)),
           in_progress: now !== undefined,
           target_to_date: targetToDate,
           percent_of_pace: pace,
@@ -165,6 +175,7 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
     async ({ author, text, line_id }) => {
       if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
       const note = await store.addNote({ line_id: line_id ?? null, author, text, created_at: new Date().toISOString() })
+      onChange('handover_notes')
       return ok({ ...note })
     },
   )
@@ -204,6 +215,11 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
     async ({ title, owner, line_id, due_date }) => {
       if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
       const followUp = await store.addFollowUp({ title, owner, line_id: line_id ?? null, due_date: due_date ?? null, created_at: new Date().toISOString() })
+      await notifier.publish({
+        subject: `New follow-up #${followUp.id}: ${followUp.title}`,
+        message: `${followUp.title}\nOwner: ${followUp.owner}\nLine: ${followUp.line_id ?? 'none'}\nDue: ${followUp.due_date ?? 'none'}`,
+      })
+      onChange('follow_ups')
       return ok({ ...followUp })
     },
   )
@@ -239,6 +255,7 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
       const result = await store.closeFollowUp(id, new Date().toISOString())
       if (result === 'not_found') return fail(`Follow-up ${id} not found.`)
       if (result === 'already_closed') return fail(`Follow-up ${id} is already closed.`)
+      onChange('follow_ups')
       return ok({ ...result })
     },
   )
@@ -272,7 +289,7 @@ export function registerTools(server: McpServer, store: Store, sim?: FactorySim)
       const rows = await store.findStock(query)
       const items = rows.map((r) => {
         const onHand = sim?.onHand(r.sku) ?? r.on_hand // live while the plant simulation runs (the store lags up to 15 sim-min)
-        const status = onHand === 0 ? ('out_of_stock' as const) : onHand <= r.reorder_point ? ('reorder' as const) : ('ok' as const)
+        const status = stockStatus(onHand, r.reorder_point)
         return {
           sku: r.sku,
           name: r.name,
