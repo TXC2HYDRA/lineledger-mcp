@@ -40,6 +40,25 @@ export function summarize(tool: string, d: Data): string {
         )
         .join(' ')
     }
+    case 'get_line_status': {
+      const lines = (d.lines as Data[]).map((l) => {
+        const down = (l.stations as Data[]).filter((s) => s.fault).map((s) => `${s.name}, ${s.fault}${s.waiting_for_part ? `, waiting for a spare ${s.waiting_for_part}` : ''}`)
+        const state = l.state === 'down' ? `down: ${down.join('; ')}` : l.state === 'starved' ? `starved, out of ${l.material.sku}` : l.state
+        const pace = l.percent_of_target_to_date === null ? '' : `, ${l.percent_of_target_to_date} percent of target to date`
+        return `Line ${String(l.line_id).slice(1)} ${state}. ${l.produced_units} good units${pace}`
+      })
+      return `Plant time ${String(d.sim_time).slice(11)}, shift ${d.shift}. ${lines.join('. ')}.`
+    }
+    case 'get_factory_events': {
+      const events = d.events as Data[]
+      return events.length ? `Latest events: ${events.slice(0, 3).map((e) => `${String(e.sim_time).slice(11)} ${e.message}`).join('. ')}.` : 'No events yet.'
+    }
+    case 'inject_fault':
+    case 'clear_fault':
+    case 'set_line_running':
+      return `${d.message} Line ${String(d.line.line_id).slice(1)} is now ${d.line.state}.`
+    case 'receive_stock':
+      return `${d.message} ${d.on_hand} on hand.`
     case 'plan_container_load':
       return `${d.count} boxes fit, limited by ${d.limitedBy}. Volume ${Math.round(d.volumeUtilisation * 100)} percent, payload ${Math.round(d.payloadUtilisation * 100)} percent, ${d.totalWeightKg} kilograms.`
     default:

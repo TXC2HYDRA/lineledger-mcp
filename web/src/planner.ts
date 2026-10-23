@@ -1,5 +1,5 @@
 // Deterministic, rule-based planner: maps one operator request to one MCP tool call.
-// No LLM involved. Phase 4 may add a model-backed planner behind the same shape.
+// No LLM involved. The optional agent service (agent/) is the model-backed alternative.
 export type Plan =
   | { kind: 'call'; tool: string; args: Record<string, unknown> }
   | { kind: 'help'; message: string }
@@ -16,9 +16,33 @@ const STOPWORDS = new Set(
 )
 
 const HELP =
-  'Try: "shift summary", "add handover note: sealer jaw ran hot", "open follow-ups", ' +
+  'Try: "line status", "shift summary", "simulate a fault on line 2 sealer", "clear fault on line 2", ' +
+  '"stop line 1", "receive 2500 kg hdpe", "factory events", "add handover note: sealer jaw ran hot", "open follow-ups", ' +
   '"add follow-up: re-check guard, owner Ravi, line 2", "close follow-up 3", "stock of hdpe", ' +
   'or "how many 600x400x300 12kg boxes fit in a 20ft container".'
+
+// Simulated stations and the line each belongs to (server/sim.ts).
+const STATIONS: Record<string, { id: string; line: string }> = {
+  slitter: { id: 'slitter', line: 'L1' },
+  press: { id: 'press', line: 'L1' },
+  packer: { id: 'packer', line: 'L1' },
+  extruder: { id: 'extruder', line: 'L2' },
+  moulder: { id: 'moulder', line: 'L2' },
+  molder: { id: 'moulder', line: 'L2' },
+  sealer: { id: 'sealer', line: 'L2' },
+}
+const stationOf = (t: string) => {
+  const name = Object.keys(STATIONS).find((k) => new RegExp(`\\b${k}s?\\b`).test(t))
+  return name ? STATIONS[name] : undefined
+}
+const SKUS: [RegExp, string][] = [
+  [/\b(hdpe|granules?|poly)\b/, 'PLY-HDPE'],
+  [/\b(steel|strip)\b/, 'STL-040'],
+  [/\b(heater|bands?)\b/, 'HTR-BAND'],
+  [/\b(labels?|rolls?)\b/, 'LBL-ROLL'],
+]
+const skuOf = (text: string): string | undefined =>
+  /\b([a-z]{3}-[a-z0-9]{3,8})\b/i.exec(text)?.[1]?.toUpperCase() ?? SKUS.find(([re]) => re.test(text.toLowerCase()))?.[1]
 
 const lineOf = (t: string): string | undefined => {
   const m = /\bline\s*#?\s*(\d+)/i.exec(t)
@@ -70,6 +94,36 @@ export function plan(input: string): Plan {
     return { kind: 'call', tool: 'list_handover_notes', args: { limit: 10, ...(line_id && { line_id }) } }
   }
 
+  // Simulation: goods receipt
+  if (/\b(receive|received|receipt|delivered|delivery|book in|goods in)\b/.test(t)) {
+    const sku = skuOf(text)
+    const qty = Number(/\b(\d[\d,]*)\b/.exec(t.replace(/\b[a-z]{3}-[a-z0-9]+\b/g, ''))?.[1]?.replace(/,/g, ''))
+    if (!sku) return { kind: 'help', message: 'Which item arrived? Say: receive 2500 kg hdpe, or receive 6 heater bands.' }
+    if (!qty) return { kind: 'help', message: 'How much arrived? Say: receive 2500 kg hdpe.' }
+    return { kind: 'call', tool: 'receive_stock', args: { sku, quantity: qty } }
+  }
+
+  // Simulation: start a fault (demo control)
+  const station = stationOf(t)
+  if (/\b(simulate|inject|trigger|cause)\b/.test(t) && /\b(fault|failure|breakdown|alarm|jam)\b/.test(t)) {
+    if (!station) return { kind: 'help', message: 'Which station? Line 1: slitter, press, packer. Line 2: extruder, moulder, sealer. Say: simulate a fault on line 2 sealer.' }
+    const reason = /\bheater\s*band\b/.test(t) ? { reason: 'Heater band failed' } : {}
+    return { kind: 'call', tool: 'inject_fault', args: { line_id: line_id ?? station.line, station_id: station.id, ...reason } }
+  }
+
+  // Simulation: maintenance cleared a fault
+  if (/\b(clear|reset|fix|fixed|repair|repaired|resolve|resolved)\b/.test(t) && (station || line_id || /\b(fault|alarm)s?\b/.test(t))) {
+    const line = line_id ?? station?.line
+    if (!line) return { kind: 'help', message: 'Which line? Say: clear fault on line 2, or clear fault on line 2 sealer.' }
+    return { kind: 'call', tool: 'clear_fault', args: { line_id: line, ...(station && { station_id: station.id }) } }
+  }
+
+  // Simulation: operator start / stop
+  const startStop = /\b(stop|halt|pause|start|restart|resume)\b/.exec(t)
+  if (startStop && line_id && /\bline\b/.test(t)) {
+    return { kind: 'call', tool: 'set_line_running', args: { line_id, running: !/^(stop|halt|pause)$/.test(startStop[1]!) } }
+  }
+
   // Container load
   const dims = /(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|cm)?/.exec(t)
   if (dims && /\b(container|fit|fits|load|pack|boxes?|cartons?|crates?)\b/.test(t)) {
@@ -95,6 +149,16 @@ export function plan(input: string): Plan {
     const query = words.sort((a, b) => b.length - a.length)[0]
     if (!query) return { kind: 'help', message: 'Which item? Say: stock of hdpe.' }
     return { kind: 'call', tool: 'check_stock', args: { query } }
+  }
+
+  // Simulation: event log
+  if (/\b(events?|alarms?|what happened|faults|andon|log)\b/.test(t)) {
+    return { kind: 'call', tool: 'get_factory_events', args: { limit: 10, ...(line_id && { line_id }) } }
+  }
+
+  // Simulation: live status right now
+  if (/\b(live|right now|currently|line status|status of line|lines? running|stations?|is line \d+ (down|running|up|stopped))\b/.test(t) || (line_id && /\b(down|status)\b/.test(t))) {
+    return { kind: 'call', tool: 'get_line_status', args: line_id ? { line_id } : {} }
   }
 
   // Shift summary

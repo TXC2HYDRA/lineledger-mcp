@@ -160,7 +160,7 @@ async function refreshShift() {
     const lines = d.lines as Data[]
     const status = statusOf(d.totals.percent_of_target)
     const downtime = lines.reduce((sum, l) => sum + l.downtime_min, 0)
-    $('hero-sub').textContent = `Shift ${d.shift} · ${d.shift_date} · output / target`
+    $('hero-sub').textContent = `Last finished shift ${d.shift} · ${d.shift_date} · output / target`
     $('hero-metric').textContent = `${d.totals.percent_of_target}%`
     setStatus($('hero-status'), status)
     $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
@@ -183,9 +183,11 @@ async function refreshShift() {
           h('p', { class: 'stat-value' }, `${l.percent_of_target}%`),
           h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${l.produced_units} of ${l.target_units}, ${l.percent_of_target} percent` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, l.percent_of_target)}%` })),
           h('p', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+          h('div', { class: 'live', id: `live-${l.line_id}` }, h('div', { class: 'live-body' }), h('div', { class: 'live-actions', role: 'group', 'aria-label': `${l.name} actions` })),
         )
       }),
     )
+    renderLive()
   } catch (e) {
     $('hero-sub').textContent = 'Shift output unavailable.'
     $('bars').dataset.state = 'error'
@@ -257,6 +259,125 @@ function showContainer(d: Data) {
 
 const refreshAll = () => Promise.all([refreshShift(), refreshTrend(), refreshNotes(), refreshFollowUps()])
 
+// ---- live production-line simulation, pushed over the MCP session ---------------------------------
+// The server sends notifications/resources/updated for factory://status and factory://events; the page then
+// reads the resource again. Everything goes through MCP, so it also shows in the trace.
+let live: Data | undefined
+let lastShiftEnd = 0
+const LIVE_ICON: Record<string, string> = { running: '▶', down: '✕', starved: '◇', stopped: '■' }
+const STATION_ICON: Record<string, string> = { running: '●', down: '✕', idle: '○' }
+const RESTOCK: Record<string, string> = { 'STL-040': 'receive 3000 kg steel strip', 'PLY-HDPE': 'receive 2500 kg hdpe' }
+const SIM_TOOLS = new Set(['inject_fault', 'clear_fault', 'set_line_running', 'receive_stock'])
+
+function liveActions(l: Data): [string, string][] {
+  const n = String(l.line_id).slice(1)
+  const fault = (l.stations as Data[]).find((s) => s.fault)
+  if (fault?.waiting_for_part) return [['Receive 6 heater bands', 'receive 6 heater bands']]
+  if (l.state === 'down') return [['Clear fault', `clear fault on line ${n}`]]
+  if (l.state === 'starved') return [[`Receive ${l.material.sku}`, RESTOCK[l.material.sku] ?? `receive 100 ${l.material.sku}`]]
+  if (l.state === 'stopped') return [['Start line', `start line ${n}`]]
+  const station = (l.stations as Data[])[1]!
+  return [
+    ['Simulate fault', `simulate a fault on line ${n} ${station.station_id}`],
+    ['Stop line', `stop line ${n}`],
+  ]
+}
+
+function renderLive() {
+  if (!live) return
+  $('live-clock').textContent = `Plant time ${String(live.sim_time).slice(11)} · shift ${live.shift} · ${live.shift_date} (simulated)`
+  for (const l of live.lines as Data[]) {
+    const el = document.getElementById(`live-${l.line_id}`)
+    if (!el) continue
+    const fault = (l.stations as Data[]).find((s) => s.fault)
+    const detail =
+      l.state === 'down'
+        ? `${fault?.name}: ${fault?.fault}${fault?.waiting_for_part ? ` · needs a spare ${fault.waiting_for_part}` : ''}`
+        : l.state === 'starved'
+          ? `Out of ${l.material.sku}`
+          : `${l.produced_units} / ${l.target_to_date} units to date${l.percent_of_target_to_date === null ? '' : ` · ${l.percent_of_target_to_date}%`}`
+    el.querySelector('.live-body')!.replaceChildren(
+      h('p', { class: 'live-head' }, h('span', { class: 'live-state', 'data-state': l.state }, `${LIVE_ICON[l.state] ?? ''} LIVE ${String(l.state).toUpperCase()}`), h('span', { class: 'live-detail' }, detail)),
+      h('ul', { class: 'stations', 'aria-label': `${l.line_id} stations` }, ...(l.stations as Data[]).map((s) => h('li', { 'data-state': s.state, title: s.fault ?? s.state }, `${STATION_ICON[s.state] ?? ''} ${s.name}`))),
+      h('p', { class: 'muted' }, `${l.material.sku} ${l.material.on_hand} on hand · scrap ${l.scrap_units} · down ${l.downtime_min} min`),
+    )
+    // Buttons are rebuilt only when the choice changes, so keyboard focus is not lost on every update.
+    const actions = el.querySelector<HTMLElement>('.live-actions')!
+    const choice = liveActions(l)
+    const key = JSON.stringify(choice)
+    if (actions.dataset.key === key) continue
+    actions.dataset.key = key
+    actions.replaceChildren(
+      ...choice.map(([label, say]) => {
+        const b = h('button', { type: 'button', title: `Says: ${say}` }, label)
+        b.addEventListener('click', () => void send(say, false, false))
+        return b
+      }),
+    )
+  }
+}
+
+function renderEvents(events: Data[]) {
+  if (!events.length) return panel('events', 'empty', muted('No events yet.'))
+  panel(
+    'events',
+    'populated',
+    ...events.slice(0, 6).map((e) => h('li', { 'data-kind': e.kind }, h('span', { class: 'muted' }, String(e.sim_time).slice(11)), ' ', e.message)),
+  )
+  const end = events.find((e) => e.kind === 'shift_end')
+  if (end && end.id > lastShiftEnd) {
+    if (lastShiftEnd !== 0) void refreshAll() // a shift just finished: summary and trend have a new row
+    lastShiftEnd = end.id
+  }
+}
+
+// One read at a time per resource; an update that arrives during a read triggers one more read.
+function reader(fn: () => Promise<void>) {
+  let running = false
+  let again = false
+  const run = async (): Promise<void> => {
+    if (running) {
+      again = true
+      return
+    }
+    running = true
+    try {
+      await fn()
+    } catch {
+      // a missed update is fine: the next notification reads again
+    } finally {
+      running = false
+      if (again) {
+        again = false
+        void run()
+      }
+    }
+  }
+  return run
+}
+const refreshLive = reader(async () => {
+  live = await mcp.readJson('factory://status')
+  renderLive()
+})
+const refreshEvents = reader(async () => renderEvents((await mcp.readJson('factory://events')).events))
+
+async function startLive(enabled: boolean) {
+  if (!enabled) {
+    $('live-clock').textContent = 'Simulation is off on this server.'
+    return panel('events', 'empty', muted('Start the server without LINELEDGER_SIM=off to see live events.'))
+  }
+  try {
+    await mcp.watch('factory://status', () => void refreshLive())
+    await mcp.watch('factory://events', () => void refreshEvents())
+  } catch {
+    setInterval(() => {
+      void refreshLive()
+      void refreshEvents()
+    }, 5000) // stateless server: no push, so poll
+  }
+  await Promise.all([refreshLive(), refreshEvents()])
+}
+
 // ---- planner mode: deterministic rules (default) or the agent service (local Ollama or Amazon Bedrock) ----
 let modelMode = false
 type AgentReply = { reply: string; tool_calls: { name: string }[]; seconds: number; model: string; provider?: string; usage?: { totalTokens: number } | null }
@@ -317,6 +438,7 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
     if (p.tool === 'plan_container_load') showContainer(d)
     if (p.tool === 'create_handover_note') void refreshNotes()
     if (p.tool === 'create_follow_up' || p.tool === 'close_follow_up') void refreshFollowUps()
+    if (SIM_TOOLS.has(p.tool)) void Promise.all([refreshLive(), refreshEvents()])
     finish(reply, fromVoice)
   } catch (e) {
     const message = `Request failed: ${errorText(e)}`
@@ -342,7 +464,8 @@ function traceLabel(e: Data): string {
   const m = e.message ?? {}
   const kind = m.method ?? (m.error ? 'error' : 'result')
   const tool = m.method === 'tools/call' ? ` ${m.params?.name}` : ''
-  return `${e.dir === 'in' ? '→ request' : '← response'} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
+  const what = e.dir === 'in' ? (m.id === undefined && m.method ? '→ notification' : '→ request') : m.id === undefined && m.method ? '← push' : '← response'
+  return `${what} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
 }
 const PULSE_CELLS = 42
 const pulse: ('in' | 'out' | 'err')[] = []
@@ -612,15 +735,19 @@ void (async () => {
   try {
     await mcp.connect()
     // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
-    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string }
+    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; simulation?: boolean }
     const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ' · store: SQLite' : ''
-    setConn('connected', `MCP connected · protocol ${mcp.protocolVersion}${store}`)
-    addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
+    const connText = () => `MCP connected · protocol ${mcp.protocolVersion} · ${mcp.sessionId ? `session ${mcp.sessionId.slice(0, 8)}` : 'stateless'}${store}`
+    setConn('connected', connText())
+    mcp.onReconnect = () => setConn('connected', connText())
+    addEventListener('pagehide', () => mcp.close())
+    addMessage('LineLedger', 'Ready. All data is synthetic demo data, and the two lines are a live simulation. Ask for line status, shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()
+    await startLive(health.simulation !== false)
   } catch (e) {
     setConn('error', 'MCP not reachable')
     setVoice('error', `Cannot reach the MCP server: ${errorText(e)}`)
-    for (const id of ['shift', 'notes', 'followups', 'trend']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
+    for (const id of ['shift', 'notes', 'followups', 'trend', 'events']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
   }
 })()

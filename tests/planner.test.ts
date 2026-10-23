@@ -29,6 +29,29 @@ describe('rule-based planner', () => {
     expect(call('do we need to order heater bands')).toMatchObject({ tool: 'check_stock', args: { query: 'heater' } })
   })
 
+  it('maps simulation requests to the simulation tools', () => {
+    expect(call('line status')).toMatchObject({ tool: 'get_line_status', args: {} })
+    expect(call('is line 2 down?')).toMatchObject({ tool: 'get_line_status', args: { line_id: 'L2' } })
+    expect(call('what is running right now')).toMatchObject({ tool: 'get_line_status' })
+    expect(call('simulate a fault on line 2 sealer')).toMatchObject({ tool: 'inject_fault', args: { line_id: 'L2', station_id: 'sealer' } })
+    expect(call('simulate a heater band failure on the sealer')).toMatchObject({ tool: 'inject_fault', args: { line_id: 'L2', station_id: 'sealer', reason: 'Heater band failed' } })
+    expect(call('trigger a jam at the slitter')).toMatchObject({ tool: 'inject_fault', args: { line_id: 'L1', station_id: 'slitter' } })
+    expect(call('clear fault on line 2')).toMatchObject({ tool: 'clear_fault', args: { line_id: 'L2' } })
+    expect(call('press on line 1 is fixed')).toMatchObject({ tool: 'clear_fault', args: { line_id: 'L1', station_id: 'press' } })
+    expect(call('stop line 1')).toMatchObject({ tool: 'set_line_running', args: { line_id: 'L1', running: false } })
+    expect(call('restart line 1')).toMatchObject({ tool: 'set_line_running', args: { line_id: 'L1', running: true } })
+    expect(call('receive 2,500 kg hdpe')).toMatchObject({ tool: 'receive_stock', args: { sku: 'PLY-HDPE', quantity: 2500 } })
+    expect(call('goods in: 6 heater bands')).toMatchObject({ tool: 'receive_stock', args: { sku: 'HTR-BAND', quantity: 6 } })
+    expect(call('received 40 of LBL-ROLL')).toMatchObject({ tool: 'receive_stock', args: { sku: 'LBL-ROLL', quantity: 40 } })
+    expect(call('factory events for line 2')).toMatchObject({ tool: 'get_factory_events', args: { line_id: 'L2' } })
+    expect(call('what happened')).toMatchObject({ tool: 'get_factory_events' })
+    // the earlier rules still win where they should
+    expect(call('stock status of hdpe')).toMatchObject({ tool: 'check_stock' })
+    expect(call('how are the lines doing in shift A')).toMatchObject({ tool: 'get_shift_summary' })
+    expect(call('close follow-up 2')).toMatchObject({ tool: 'close_follow_up' })
+    for (const text of ['simulate a fault', 'clear fault', 'receive hdpe', 'receive 40 things']) expect(plan(text).kind, text).toBe('help')
+  })
+
   it('builds a container-load call with 20ft and 40ft presets', () => {
     const p20 = call('how many 600x400x300 12kg boxes fit in a 20ft container')
     expect(p20).toMatchObject({
