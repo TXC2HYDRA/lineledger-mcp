@@ -57,6 +57,15 @@ request; GET and DELETE on `/mcp` return 405. Persistent state lives in SQLite, 
 Reasons: simplest for a single-process demo, and the stateful path has an open client gotcha
 (no re-initialize after a 404, issue #1708). `scripts/mcp-preflight.ts` is written to this pattern.
 
+**D2 update, 2026-10-23: stateful mode added as an opt-in.** `LINELEDGER_STATEFUL=1` keeps one server and
+transport per session (`server/sessions.ts`). The default is still stateless, so the tested demo path did not
+change. The reason for the addition is server-to-client push: with sessions, one tab sees a note or follow-up
+written by another without polling. Checked on SDK 1.32.1: after the server drops a session, the plain SDK
+client fails every later call with a 404 and does not start a new session (the 2025-11-25 transport spec says
+a client must). `web/src/mcp.ts` therefore reconnects once on a 404 or a dead socket and retries, and shares
+one reconnect between concurrent calls. Sessions are in memory, so a restart loses them but never data.
+Not covered: the optional Python agent against stateful mode, and more than one server process.
+
 ## D3. Browser client
 
 Serve the web client and proxy `/mcp` through the same origin (Vite proxy) to avoid CORS.
