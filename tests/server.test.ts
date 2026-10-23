@@ -70,7 +70,7 @@ describe('protocol', () => {
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, stateful: false, sessions: 0 })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, degraded: false, stateful: false, sessions: 0 })
   })
 
   it('returns 405 on GET and DELETE /mcp', async () => {

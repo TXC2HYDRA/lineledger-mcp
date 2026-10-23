@@ -8,6 +8,7 @@ import type { Request, Response } from 'express'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
+import type { Notifier } from './notify.js'
 import type { Store } from './store.js'
 import { registerTools, type ChangeResource } from './tools.js'
 import { traceSends, type TraceTap } from './trace.js'
@@ -24,7 +25,7 @@ interface Session {
 const rpcError = (res: Response, status: number, code: number, message: string) =>
   res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null })
 
-export function createSessionHandlers(store: Store, trace: TraceTap) {
+export function createSessionHandlers(store: Store, trace: TraceTap, notifier: Notifier) {
   const sessions = new Map<string, Session>()
 
   const broadcast = (resource: ChangeResource) => {
@@ -37,7 +38,7 @@ export function createSessionHandlers(store: Store, trace: TraceTap) {
 
   function open(): Session {
     const server = new McpServer({ name: 'lineledger', version: '0.1.0' }, { capabilities: { logging: {} } })
-    registerTools(server, store, broadcast)
+    registerTools(server, store, notifier, broadcast)
     const session: Session = {
       server,
       lastSeen: Date.now(),

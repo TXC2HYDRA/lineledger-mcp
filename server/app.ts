@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { noNotifier, type Notifier } from './notify.js'
 import type { Store } from './store.js'
 import { registerTools } from './tools.js'
 import { createSessionHandlers } from './sessions.js'
@@ -9,6 +10,7 @@ import { TraceTap, traceSends } from './trace.js'
 
 export interface AppOptions {
   store: Store
+  notifier?: Notifier
   trace?: TraceTap
   /** Browser origins allowed to call the server. Requests without an Origin header (non-browser clients) pass. */
   allowedOrigins: string[]
@@ -19,7 +21,7 @@ export interface AppOptions {
 const rpcError = (res: Response, status: number, code: number, message: string) =>
   res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null })
 
-export function createApp({ store, trace = new TraceTap(), allowedOrigins, stateful = false }: AppOptions) {
+export function createApp({ store, notifier = noNotifier, trace = new TraceTap(), allowedOrigins, stateful = false }: AppOptions) {
   const app = express()
   app.disable('x-powered-by')
 
@@ -38,7 +40,7 @@ export function createApp({ store, trace = new TraceTap(), allowedOrigins, state
   const statelessPost = async (req: Request, res: Response) => {
     // Stateless (decision D2): a new server and transport per request, state lives in the store.
     const server = new McpServer({ name: 'lineledger', version: '0.1.0' })
-    registerTools(server, store)
+    registerTools(server, store, notifier)
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
 
     const inbound: unknown = req.body
@@ -60,7 +62,7 @@ export function createApp({ store, trace = new TraceTap(), allowedOrigins, state
     res.set('Allow', 'POST')
     rpcError(res, 405, -32000, 'Method not allowed.')
   }
-  const sessions = stateful ? createSessionHandlers(store, trace) : undefined
+  const sessions = stateful ? createSessionHandlers(store, trace, notifier) : undefined
   if (sessions) {
     app.post('/mcp', sessions.post)
     app.get('/mcp', sessions.stream)
@@ -72,7 +74,7 @@ export function createApp({ store, trace = new TraceTap(), allowedOrigins, state
   }
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, stateful, sessions: sessions?.sessionCount() ?? 0 })
+    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, degraded: store.degraded ?? false, stateful, sessions: sessions?.sessionCount() ?? 0 })
   })
   app.get('/api/trace', (req, res) => {
     res.json({ entries: trace.list(Number(req.query.since) || 0) })
