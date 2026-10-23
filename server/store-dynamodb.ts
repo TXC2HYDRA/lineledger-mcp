@@ -264,6 +264,25 @@ export class DynamoDbStore implements Store {
       .filter((s) => s.sku.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
   }
 
+  async putShiftOutput(row: ShiftOutputRow): Promise<void> {
+    await this.doc.send(new PutCommand({ TableName: this.table, Item: { ...keys.shift(row), ...toShift(row as unknown as Item) } }))
+  }
+
+  async setStockOnHand(sku: string, onHand: number): Promise<void> {
+    if (sku === '') return
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: this.table,
+        Key: keys.stock(sku),
+        UpdateExpression: 'SET on_hand = :n',
+        ConditionExpression: 'attribute_exists(pk)', // never create a stock item from a stray update
+        ExpressionAttributeValues: { ':n': onHand },
+      }),
+    ).catch((error: unknown) => {
+      if (!isConditionalFailure(error)) throw error
+    })
+  }
+
   /** Writes the synthetic demo data once per table. Returns true when it seeded. */
   async ensureSeeded(): Promise<boolean> {
     if (await this.get(keys.seed)) return false

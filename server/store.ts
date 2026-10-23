@@ -74,6 +74,9 @@ export interface Store {
   closeFollowUp(id: number, closed_at: string): Promise<FollowUpRow | 'not_found' | 'already_closed'>
   /** Case-insensitive substring match on SKU or name, ordered by SKU. */
   findStock(query: string): Promise<StockRow[]>
+  /** Insert or replace one shift result (the simulation writes one per line at each shift end). */
+  putShiftOutput(row: ShiftOutputRow): Promise<void>
+  setStockOnHand(sku: string, onHand: number): Promise<void>
   close(): Promise<void>
 }
 

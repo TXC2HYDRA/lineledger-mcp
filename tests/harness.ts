@@ -5,8 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
-import { createLocalTable, deleteLocalTable, DynamoDbStore, keys, localClient } from '../server/store-dynamodb.js'
+import { createLocalTable, deleteLocalTable, DynamoDbStore, localClient } from '../server/store-dynamodb.js'
 import { SqliteStore } from '../server/store-sqlite.js'
 import type { ShiftOutputRow, Store, StoreKind } from '../server/store.js'
 
@@ -29,14 +28,8 @@ const sqlite: Harness = {
     const file = join(dir, 'test.sqlite')
     return { open: async () => SqliteStore.open(file), cleanup: async () => rmSync(dir, { recursive: true, force: true }) }
   },
-  putShift: async (store, r) => {
-    ;(store as SqliteStore).db
-      .prepare('INSERT INTO shift_output VALUES (?, ?, ?, ?, ?, ?)')
-      .run(r.line_id, r.shift_date, r.shift, r.target_units, r.produced_units, r.downtime_min)
-  },
-  setOnHand: async (store, sku, onHand) => {
-    ;(store as SqliteStore).db.prepare('UPDATE stock_items SET on_hand = ? WHERE sku = ?').run(onHand, sku)
-  },
+  putShift: (store, row) => store.putShiftOutput(row),
+  setOnHand: (store, sku, onHand) => store.setStockOnHand(sku, onHand),
   dispose: (store) => store.close(),
 }
 
@@ -60,16 +53,8 @@ function dynamodb(endpoint: string): Harness {
       const table = await newTable()
       return { open: () => openOn(table), cleanup: () => deleteLocalTable(endpoint, table) }
     },
-    putShift: async (store, row) => {
-      const s = store as DynamoDbStore
-      await s.doc.send(new PutCommand({ TableName: s.table, Item: { ...keys.shift(row), ...row } }))
-    },
-    setOnHand: async (store, sku, onHand) => {
-      const s = store as DynamoDbStore
-      await s.doc.send(
-        new UpdateCommand({ TableName: s.table, Key: keys.stock(sku), UpdateExpression: 'SET on_hand = :n', ExpressionAttributeValues: { ':n': onHand } }),
-      )
-    },
+    putShift: (store, row) => store.putShiftOutput(row),
+    setOnHand: (store, sku, onHand) => store.setStockOnHand(sku, onHand),
     dispose: async (store) => {
       const table = (store as DynamoDbStore).table
       await store.close()

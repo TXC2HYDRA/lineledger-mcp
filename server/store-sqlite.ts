@@ -97,6 +97,16 @@ export class SqliteStore implements Store {
       .all(query) as unknown as StockRow[]
   }
 
+  async putShiftOutput(r: ShiftOutputRow): Promise<void> {
+    this.db
+      .prepare('INSERT OR REPLACE INTO shift_output (line_id, shift_date, shift, target_units, produced_units, downtime_min) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(r.line_id, r.shift_date, r.shift, r.target_units, r.produced_units, r.downtime_min)
+  }
+
+  async setStockOnHand(sku: string, onHand: number): Promise<void> {
+    this.db.prepare('UPDATE stock_items SET on_hand = ? WHERE sku = ?').run(onHand, sku)
+  }
+
   async close(): Promise<void> {
     try {
       this.db.close()
