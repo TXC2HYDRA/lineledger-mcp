@@ -161,3 +161,49 @@ describe('plant profile on an empty store (no hand-written demo rows)', () => {
     expect(await store.latestShift({})).toEqual({ shift_date: '2026-10-22', shift: 'A' })
   })
 })
+
+describe('restart resumes the shift where it stopped', () => {
+  it('a new simulation on the same store continues the same day, with the same random draws', async () => {
+    const store = SqliteStore.open(':memory:', { seed: false })
+    await applyPlantSeed(store)
+    const a = await FactorySim.create(store)
+    await a.advance(40 * MIN) // 13:35, between the sealer warning and the trip
+    await a.flushNow()
+    const b = await FactorySim.create(store) // what a restarted server does
+
+    const view = (s: FactorySim) => {
+      const x = s.snapshot()
+      return { now: x.sim_clock.sim_now, shift: x.shift, alarms: x.alarms_open, lines: x.lines.map((l) => [l.line_id, l.state, l.since, l.produced_units, l.reject_units, l.downtime_min, l.signals.map((g) => g.value)]) }
+    }
+    expect(view(b)).toEqual(view(a))
+    expect(b.events({ limit: 5 })).toEqual(a.events({ limit: 5 }))
+    await Promise.all([a.advance(2 * HOUR), b.advance(2 * HOUR)]) // through the trip, the part swap and the restart
+    expect(view(b)).toEqual(view(a))
+    expect(line(b, 'L2').produced_units).toBeGreaterThan(0)
+  })
+
+  it('ignores saved state from another seed and from unreadable text', async () => {
+    const store = SqliteStore.open(':memory:', { seed: false })
+    await applyPlantSeed(store)
+    await FactorySim.create(store, { seed: 7 }).then((s) => s.flushNow())
+    expect((await FactorySim.create(store, { seed: 1 })).snapshot().sim_clock.sim_now).toBe('2026-10-22 14:00') // not seed 7's state: continues with the shift after the stored one
+    await store.putSimState('not json')
+    await expect(FactorySim.create(store)).resolves.toBeDefined()
+  })
+})
+
+describe('plant database made before the demo rows were dropped', () => {
+  it('loses exactly the seeded rows, keeps its own, and gets simulated history', async () => {
+    const store = SqliteStore.open(':memory:') // seeded, like an old plant.sqlite
+    await store.addNote({ line_id: 'L2', author: 'Own', text: 'kept', created_at: '2026-10-22T09:00:00.000Z' })
+    await applyPlantSeed(store)
+    expect(store.dropDemoSeed()).toBe(true)
+    expect((await store.listNotes({ limit: 10 })).map((n) => n.text)).toEqual(['kept'])
+    expect(await store.listFollowUps({ status: 'all' })).toEqual([])
+    await store.setStockOnHand('PLY-HDPE', 12_345)
+    await FactorySim.history(store)
+    expect((await store.recentShifts(500)).length).toBeGreaterThan(100)
+    expect(await onHand(store, 'PLY-HDPE')).toBe(12_345) // history leaves the stock as it found it
+    expect(store.dropDemoSeed()).toBe(false)
+  })
+})

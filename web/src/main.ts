@@ -762,11 +762,12 @@ void (async () => {
     await mcp.listTools()
     await refreshAll()
     await startLive(health.simulation !== false)
-    // A server restart ends the session and stops the pushes. Nothing heard for 10 s: ping, which opens a new
-    // session on a 404 (see mcp.ts), and say so on the page meanwhile instead of showing stale data as live.
+    // A server restart ends the session and stops the pushes. Nothing heard for 5 s while the plant pushes (30 s
+    // otherwise): ping, which opens a new session on a 404 (see mcp.ts), and say so on the page meanwhile
+    // instead of showing stale data as live.
     let lost = false
     setInterval(async () => {
-      if (Date.now() - mcp.lastHeard < 10_000) return
+      if (Date.now() - mcp.lastHeard < (mcp.watching ? 5_000 : 30_000)) return
       try {
         await mcp.ping()
         if (lost) {
@@ -780,7 +781,7 @@ void (async () => {
           setConn('connecting', 'MCP connection lost, reconnecting…')
         }
       }
-    }, 5000)
+    }, 2000)
   } catch (e) {
     setConn('error', 'MCP not reachable')
     setVoice('error', `Cannot reach the MCP server: ${errorText(e)}`)

@@ -88,7 +88,9 @@ describe('protocol', () => {
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: false })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: false, sessions: 0 })
+    await connect()
+    expect(await (await fetch(`${url}/api/health`)).json()).toMatchObject({ sessions: 1 })
   })
 
   it('offers no resources in the seed profile', async () => {

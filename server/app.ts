@@ -272,7 +272,7 @@ export function createApp({
   }
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, mcp: mode, simulation: sim !== undefined })
+    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, mcp: mode, simulation: sim !== undefined, sessions: sessions.size })
   })
   app.get('/api/trace', (req, res) => {
     res.json({ entries: trace.list(Number(req.query.since) || 0) })

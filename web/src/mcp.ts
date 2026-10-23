@@ -78,6 +78,11 @@ export class McpConnection {
     }
   }
 
+  /** True while a resource is watched: the server then pushes every second or so, so silence means trouble. */
+  get watching(): boolean {
+    return this.watchers.size > 0
+  }
+
   /** Liveness check. After a server restart the old session id gets a 404, so this opens a new session. */
   async ping(): Promise<void> {
     await this.retry(async () => {

@@ -12,7 +12,11 @@
 // the simulation is a goods receipt (receive_stock), which is a business record, not a machine command.
 //
 // Live state is in memory. In-progress and finished shifts go to the store as shift_output rows, and
-// stock levels as stock_items.on_hand, so the existing tools read the simulation's output.
+// stock levels as stock_items.on_hand, so the existing tools read the simulation's output. With every flush
+// the whole live state (clock, per-line state, random streams, alarms, recent events) is also saved as one
+// JSON text, so a restarted server resumes the shift where it stopped. The plant clock does not run while
+// the server is down.
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { PLANNED_MIN, PLANT, type PlantLine, type PlantSignal, type StoryBeat } from './plant.js'
 import type { Store } from './store.js'
 
@@ -104,7 +108,7 @@ interface SignalRt {
 
 interface LineRt {
   spec: PlantLine
-  rng: () => number
+  rng: Rng
   state: LineState
   since: number
   stop: Stop | null
@@ -123,16 +127,19 @@ interface LineRt {
 
 // ---- small helpers ---------------------------------------------------------------------------------
 
-/** mulberry32: the same seed gives the same stream. */
-function mulberry32(seed: number): () => number {
+type Rng = (() => number) & { state(): number }
+
+/** mulberry32: the same seed gives the same stream. `state()` is the seed that continues it from here. */
+function mulberry32(seed: number): Rng {
   let a = seed >>> 0
-  return () => {
+  const next = () => {
     a = (a + 0x6d2b79f5) >>> 0
     let t = a
     t = Math.imul(t ^ (t >>> 15), t | 1)
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
+  return Object.assign(next, { state: () => a })
 }
 /** One substream per (seed, line), so adding a line does not change the others. */
 const substream = (seed: number, key: string) => mulberry32([...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), (seed ^ 2166136261) >>> 0))
@@ -157,6 +164,39 @@ export function plannedElapsed(elapsed: number): number {
 }
 const inBreak = (elapsed: number) => PLANT.breaks.find((b) => elapsed >= b.after_min && elapsed < b.after_min + b.min)
 
+type SavedLine = Pick<LineRt, 'state' | 'since' | 'stop' | 'runToStop' | 'restartAt' | 'good' | 'reject' | 'rejectCodes' | 'downtimeMin' | 'unitAcc' | 'recent' | 'rejectRamp' | 'starvedOn'> & {
+  rng: number
+  signals: Pick<SignalRt, 'value' | 'ramp' | 'trippedAt'>[]
+}
+interface Saved {
+  v: 1
+  seed: number
+  t: number
+  shift: ShiftId
+  shiftStart: number
+  lastFlush: number
+  lastLog: number
+  pending: number
+  nextEventId: number
+  story: boolean
+  doneBeats: number[]
+  alarms: Alarm[]
+  log: FactoryEvent[]
+  stock: Record<string, { used: number; log: { t: number; used: number }[] }>
+  lines: Record<string, SavedLine>
+}
+
+/** The saved live state (gzipped JSON as base64), or undefined when there is none, it is unreadable, or it came from another seed. */
+function parseSaved(json: string | undefined, seed: number): Saved | undefined {
+  if (!json) return undefined
+  try {
+    const s = JSON.parse(gunzipSync(Buffer.from(json, 'base64')).toString('utf8')) as Saved
+    return s.v === 1 && s.seed === seed && Number.isFinite(s.t) && ORDER.includes(s.shift) ? s : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export class FactorySim {
   private t = 0
   private shift: ShiftId = 'A'
@@ -173,6 +213,8 @@ export class FactorySim {
   private readonly listeners = new Set<() => void>()
   private readonly randomFaults: boolean
   private story: Plant['story'] | null = null
+  /** False for the headless history run, which must not overwrite the saved live state. */
+  private persist = true
   private readonly doneBeats = new Set<number>()
   private timer: ReturnType<typeof setInterval> | undefined
   private holdUntil = 0
@@ -211,10 +253,16 @@ export class FactorySim {
   /**
    * Loads stock from the store and picks the start. On a fresh plant store (latest shift on record before
    * the story day) the story day runs: shift A from 06:00 is simulated at once up to the story start (12:55),
-   * then the clock goes live. Otherwise the simulation continues with the shift after the latest on record.
+   * then the clock goes live. A store with saved live state resumes exactly there. Otherwise (a store from
+   * before the state was saved) the simulation continues with the shift after the latest on record.
    */
   static async create(store: Store, options: SimOptions = {}): Promise<FactorySim> {
     const sim = await FactorySim.load(store, options.seed ?? PLANT.story.seed, options)
+    const saved = parseSaved(await store.getSimState(), sim.seed)
+    if (saved) {
+      sim.restore(saved, options.story ?? true)
+      return sim
+    }
     const latest = await store.latestShift({})
     const storyDay = Date.parse(`${PLANT.story.date}T00:00:00.000Z`)
     const latestDay = latest ? Date.parse(`${latest.shift_date}T00:00:00.000Z`) : storyDay - DAY
@@ -253,11 +301,13 @@ export class FactorySim {
   /**
    * For a fresh plant store: simulates the `days` whole days before the story day, headless and with its own
    * random streams, and writes only their shift results, so the shift history and the trend hold simulated
-   * shifts instead of hand-written ones. Stock goes back to the plant's starting levels afterwards, and the
+   * shifts instead of hand-written ones. Stock goes back to the levels it had before, and the
    * last shift stays one minute short of its end, so the story day still runs on this store.
    */
   static async history(store: Store, days = 7): Promise<void> {
     const sim = await FactorySim.load(store, PLANT.story.seed + 1, { story: false })
+    sim.persist = false
+    const before = new Map([...sim.stock].map(([sku, item]) => [sku, Math.floor(item.onHand + 1e-9)]))
     for (const item of sim.stock.values()) item.onHand = 1e12 // a week of goods receipts is not modelled: no line starves
     const storyDay = Date.parse(`${PLANT.story.date}T00:00:00.000Z`)
     const end = storyDay + PLANT.shifts.A.start_min * MINUTE
@@ -265,7 +315,50 @@ export class FactorySim {
     sim.lastLog = sim.t
     await sim.run(days * DAY - MINUTE, false)
     await sim.flush(true)
-    for (const item of PLANT.stock) await store.putStockItem(item)
+    for (const [sku, onHand] of before) await store.setStockOnHand(sku, onHand)
+  }
+
+  private serialize(): string {
+    const lines: Record<string, SavedLine> = {}
+    for (const l of this.lines) {
+      lines[l.spec.id] = {
+        state: l.state, since: l.since, stop: l.stop, runToStop: l.runToStop, restartAt: l.restartAt, good: l.good, reject: l.reject,
+        rejectCodes: l.rejectCodes, downtimeMin: l.downtimeMin, unitAcc: l.unitAcc, recent: l.recent, rejectRamp: l.rejectRamp,
+        starvedOn: l.starvedOn, rng: l.rng.state(), signals: l.signals.map(({ value, ramp, trippedAt }) => ({ value, ramp, trippedAt })),
+      }
+    }
+    const saved: Saved = {
+      v: 1, seed: this.seed, t: this.t, shift: this.shift, shiftStart: this.shiftStart, lastFlush: this.lastFlush, lastLog: this.lastLog,
+      pending: this.pending, nextEventId: this.nextEventId, story: this.story !== null, doneBeats: [...this.doneBeats], alarms: this.alarms,
+      log: this.log, stock: Object.fromEntries([...this.stock].map(([sku, s]) => [sku, { used: s.used, log: s.log }])), lines,
+    }
+    // Gzipped, as base64 text: about a tenth of the size, which matters for a DynamoDB item (one write unit per KB).
+    return gzipSync(JSON.stringify(saved)).toString('base64')
+  }
+
+  /** Puts a saved live state back. Stock levels stay as the store holds them (goods receipts go there too). */
+  private restore(s: Saved, story: boolean): void {
+    this.t = s.t
+    this.shift = s.shift
+    this.shiftStart = s.shiftStart
+    this.lastFlush = s.lastFlush
+    this.lastLog = s.lastLog
+    this.pending = s.pending
+    this.nextEventId = s.nextEventId
+    if (s.story && story) this.story = PLANT.story
+    for (const i of s.doneBeats) this.doneBeats.add(i)
+    this.alarms.push(...s.alarms)
+    this.log.push(...s.log)
+    for (const [sku, st] of Object.entries(s.stock)) {
+      const item = this.stock.get(sku)
+      if (item) Object.assign(item, { used: st.used, log: st.log })
+    }
+    for (const l of this.lines) {
+      const { rng, signals, ...rest } = s.lines[l.spec.id] ?? ({} as Partial<SavedLine>)
+      Object.assign(l, rest)
+      if (rng !== undefined) l.rng = mulberry32(rng)
+      signals?.forEach((sg, i) => l.signals[i] && Object.assign(l.signals[i], sg))
+    }
   }
 
   // ---- reading ----------------------------------------------------------------------------------
@@ -717,6 +810,7 @@ export class FactorySim {
       item.dirty = false
     }
     this.lastFlush = this.t
+    if (this.persist) await this.store.putSimState(this.serialize())
   }
 }
 

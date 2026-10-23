@@ -2,6 +2,7 @@ import { createApp, type McpMode } from './app.js'
 import { applyPlantSeed } from './plant.js'
 import { FactorySim } from './sim.js'
 import { openStore } from './store.js'
+import { SqliteStore } from './store-sqlite.js'
 
 const port = Number(process.env.PORT ?? 8787)
 const webPort = Number(process.env.WEB_PORT ?? 5173)
@@ -21,7 +22,9 @@ const store = await openStore(process.env)
 
 let sim: FactorySim | undefined
 if (plant) {
-  if (await applyPlantSeed(store)) await FactorySim.history(store) // a fresh plant store: a week of simulated shifts first
+  // A fresh plant store gets a week of simulated shifts first. An older plant database loses the two-line demo rows
+  // it was made with, and gets the same week.
+  if ((await applyPlantSeed(store)) || (store instanceof SqliteStore && store.dropDemoSeed())) await FactorySim.history(store)
   // LINELEDGER_SIM_SPEED: simulated seconds per real second (default 120: one simulated hour in 30 seconds).
   const speed = Number(process.env.LINELEDGER_SIM_SPEED ?? 120)
   if (!Number.isFinite(speed) || speed <= 0 || speed > 3600) throw new Error('LINELEDGER_SIM_SPEED must be a number from 0 to 3600')

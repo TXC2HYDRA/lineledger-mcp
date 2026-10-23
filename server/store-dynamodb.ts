@@ -46,6 +46,7 @@ export const keys = {
   stock: (sku: string): Key => ({ pk: 'STOCK', sk: sku }),
   counter: (name: 'note' | 'followup'): Key => ({ pk: 'CTR', sk: name }),
   seed: { pk: 'META', sk: 'seed' } as Key,
+  simState: { pk: 'META', sk: 'sim-state' } as Key,
 }
 
 const str = (v: unknown) => String(v)
@@ -281,6 +282,15 @@ export class DynamoDbStore implements Store {
     ).catch((error: unknown) => {
       if (!isConditionalFailure(error)) throw error
     })
+  }
+
+  async getSimState(): Promise<string | undefined> {
+    const item = await this.get(keys.simState)
+    return item === undefined ? undefined : str(item.json)
+  }
+
+  async putSimState(json: string): Promise<void> {
+    await this.doc.send(new PutCommand({ TableName: this.table, Item: { ...keys.simState, json } }))
   }
 
   async addLine(line: LineRow): Promise<void> {

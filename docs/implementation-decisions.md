@@ -200,6 +200,12 @@ Built from the handoff `docs/simulation_context.md`, reshaped to the time left (
   follow-ups, hand-written shift trend). A fresh plant store gets seven simulated days of shift history
   (`FactorySim.history`) before the story day. Night-shift (C) targets for Lines 2 and 4 were raised to the day
   targets (800 and 940), because the simulated history showed them at 110 to 155 percent.
+- D-RESUME: with every flush the simulation saves its live state (gzipped JSON, about 6 KB, `Store.putSimState`; table
+  `sim_state` in SQLite, item META/sim-state in DynamoDB) and `FactorySim.create` resumes from it when the seed
+  matches. The mulberry32 streams expose their state, so a resumed run draws the same numbers as an unbroken run
+  (tested). The clock is paused while the server is down. Older databases without saved state keep the previous
+  rule: continue with the shift after the latest on record. A plant database from before D-NOSEED loses exactly
+  the seeded demo rows at startup (`SqliteStore.dropDemoSeed`, SQLite only).
 - D-STATEFUL: shipped (D2b), so the dashboard is pushed `plant://snapshot` updates instead of polling.
 - Determinism: one simulated minute per step whatever the real tick size; per-line random substreams;
   seed 1 meets the story checks (`npm run plant:story-check`).

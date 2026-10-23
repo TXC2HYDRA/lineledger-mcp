@@ -62,8 +62,9 @@ keeps the small two-line seed and no simulation, as the tests use it.
 The plant profile has no hand-written demo rows. On a fresh plant database the server first simulates the
 seven days before the story day (about 0.1 s, its own random streams, stock back at the starting levels
 afterwards), so the shift history and the trend hold simulated shifts for all seven lines; notes and
-follow-ups start empty. A plant database made before this change (`data/plant.sqlite`) keeps its old seed
-rows until `npm run plant:reset`.
+follow-ups start empty. A plant database made before this change (`data/plant.sqlite`) loses exactly the old
+seeded notes, follow-ups and shift rows when the server starts, keeps its own rows and stock, and gets the same
+week of history.
 
 ## Run it
 
@@ -86,8 +87,12 @@ in 30 seconds; the story's 14:10 to 16:15 stretch runs as a x300 time-lapse, sho
 `LINELEDGER_SIM_HOLDS=on` (the clock pauses 12 seconds at 12:58, 13:15 and 13:23 so a presenter can speak;
 the chip shows HOLD), `LINELEDGER_SIM_SEED` (default 1; the same seed gives the same day at any speed),
 `LINELEDGER_SIM_FAULTS=off` (scripted stops only), `LINELEDGER_SIM_STORY=off` (no story). The story day runs
-on a fresh plant database: it starts at 12:55 with shift A already simulated from 06:00. On a database that
-already holds later shifts, the plant continues with the next shift. `npm run plant:reset` deletes the plant
+on a fresh plant database: it starts at 12:55 with shift A already simulated from 06:00. A restarted server
+resumes where the plant stopped: with every flush (each 15 simulated minutes, and at shutdown) the simulation
+saves its whole live state (clock, per-line state and counters, open stops and alarms, random streams, recent
+events) in the store, and the same seed then continues the same day. The plant clock does not run while the
+server is down. A database from before this was saved continues with the shift after the latest one on
+record. `npm run plant:reset` deletes the plant
 database to replay the story; `npm run plant:story-check` runs the story day headless and checks its
 numbers (Line 2 trips at 13:23, Line 2 shift A good units, plant shift A output, HDPE reorder time,
 heater bands left).

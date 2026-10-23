@@ -1,5 +1,6 @@
 // Default store: one node:sqlite file. The SQL is the same the tools used before the store interface existed.
 import { openDb, type Db } from './db.js'
+import { SEED_FOLLOW_UPS, SEED_NOTES, SEED_SHIFT_OUTPUT, seedHistory } from './seed.js'
 import type { FollowUpRow, LineRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store } from './store.js'
 
 export class SqliteStore implements Store {
@@ -115,6 +116,29 @@ export class SqliteStore implements Store {
     this.db
       .prepare('INSERT OR REPLACE INTO stock_items (sku, name, unit, on_hand, reorder_point, reorder_qty, lead_days, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(s.sku, s.name, s.unit, s.on_hand, s.reorder_point, s.reorder_qty, s.lead_days, s.supplier)
+  }
+
+  async getSimState(): Promise<string | undefined> {
+    return (this.db.prepare('SELECT json FROM sim_state WHERE id = 1').get() as { json: string } | undefined)?.json
+  }
+
+  async putSimState(json: string): Promise<void> {
+    this.db.prepare('INSERT INTO sim_state (id, json) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json').run(json)
+  }
+
+  /**
+   * A plant database made before the plant profile dropped the two-line demo data still holds those rows.
+   * Removes exactly the seeded notes, follow-ups and shift rows. True when it removed any.
+   */
+  dropDemoSeed(): boolean {
+    let removed = 0
+    const run = (sql: string, ...args: (string | number)[]) => (removed += Number(this.db.prepare(sql).run(...args).changes))
+    for (const n of SEED_NOTES) run('DELETE FROM handover_notes WHERE author = ? AND text = ? AND created_at = ?', n.author, n.text, n.created_at)
+    for (const f of SEED_FOLLOW_UPS) run('DELETE FROM follow_ups WHERE title = ? AND owner = ? AND created_at = ?', f.title, f.owner, f.created_at)
+    for (const r of [...SEED_SHIFT_OUTPUT, ...seedHistory()]) {
+      run('DELETE FROM shift_output WHERE line_id = ? AND shift_date = ? AND shift = ? AND produced_units = ?', r.line_id, r.shift_date, r.shift, r.produced_units)
+    }
+    return removed > 0
   }
 
   async close(): Promise<void> {

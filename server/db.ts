@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   created_at TEXT NOT NULL,
   closed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS sim_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stock_items (
   sku TEXT PRIMARY KEY,
   name TEXT NOT NULL,
