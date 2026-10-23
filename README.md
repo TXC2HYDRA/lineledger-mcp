@@ -157,6 +157,23 @@ only).
 Not used on purpose: SQS (nothing slow to queue yet), DynamoDB Streams (the server publishes its own
 events, and the table keeps streams off), Kinesis, Amazon MQ and ElastiCache (no workload for them).
 
+### Fallbacks to self-hosted services
+
+An AWS outage, missing credentials or a throttled model never ends in an error page. Each AWS piece has a
+self-hosted twin that takes over by itself (`LINELEDGER_FALLBACK=off` turns them all off):
+
+| AWS piece | Falls back to | How |
+|---|---|---|
+| DynamoDB store | SQLite file (`LINELEDGER_DB`) | `server/store-fallback.ts`: a failed or slow call (8 s) is served by SQLite, DynamoDB is skipped for 30 s and then tried again. Also covers DynamoDB being down or misconfigured at startup. `/api/health` shows `degraded: true`, the page shows "SQLite (fallback)". |
+| SNS alerts | `LINELEDGER_NOTIFY=local`: JSONL file `LINELEDGER_ALERT_FILE` plus optional `LINELEDGER_WEBHOOK_URL` (ntfy, Mattermost, Slack-style) | `server/notify.ts`: a failed publish (5 s limit) goes to the local channel. |
+| Bedrock model | Local Ollama model (loopback only) | `agent/service.py` (`ask_with_fallback`): a failed Bedrock turn is retried on Ollama; the chat shows "local model (fallback from Bedrock)". |
+| Agent model, either kind | Rule-based planner | `web/src/main.ts`: if the agent service fails, the same request is answered by the rules. |
+| EventBridge + Lambda report | `npm run report` from cron | `scripts/shift-report.ts` builds the same digest and sends it through the configured notifier. Example: `0 6,14,22 * * * cd /path/to/repo && LINELEDGER_NOTIFY=local npm run report`. |
+
+Redis and Celery are not used: SQLite, a JSONL file and cron already cover these jobs without another
+server to run. While the primary store is down, new notes and follow-ups exist only in SQLite and the
+DynamoDB rows are not shown; the two stores are not synced (noted in `server/store-fallback.ts`).
+
 ### Safety rules in the code
 
 - Real AWS is reached only through a project-only profile: `AWS_PROFILE=lineledger`, with

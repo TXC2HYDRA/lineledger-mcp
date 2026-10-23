@@ -58,6 +58,8 @@ export type StoreKind = 'sqlite' | 'dynamodb'
 
 export interface Store {
   readonly kind: StoreKind
+  /** True while a fallback store is serving instead of the configured one. */
+  readonly degraded?: boolean
   lineExists(id: string): Promise<boolean>
   /** Latest (date, shift) on record, optionally restricted to one date and/or one shift letter. */
   latestShift(filter: { shift_date?: string; shift?: string }): Promise<{ shift_date: string; shift: string } | undefined>
@@ -87,12 +89,18 @@ export function storeKind(value: string | undefined): StoreKind {
   return kind as StoreKind
 }
 
-/** Opens the store named by LINELEDGER_STORE (default sqlite). The DynamoDB module loads only when asked for. */
+/**
+ * Opens the store named by LINELEDGER_STORE (default sqlite). The DynamoDB module loads only when asked for.
+ * With dynamodb, the SQLite file is the fallback unless LINELEDGER_FALLBACK=off (see store-fallback.ts).
+ */
 export async function openStore(env: NodeJS.ProcessEnv = process.env): Promise<Store> {
-  if (storeKind(env.LINELEDGER_STORE) === 'dynamodb') {
-    const { openDynamoDbStore } = await import('./store-dynamodb.js')
-    return openDynamoDbStore(env)
-  }
-  const { SqliteStore } = await import('./store-sqlite.js')
-  return SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite')
+  const openSqlite = async () => (await import('./store-sqlite.js')).SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite')
+  if (storeKind(env.LINELEDGER_STORE) !== 'dynamodb') return openSqlite()
+  const openDynamo = async () => (await import('./store-dynamodb.js')).openDynamoDbStore(env)
+  if (fallbackOff(env)) return openDynamo()
+  const { FallbackStore } = await import('./store-fallback.js')
+  return new FallbackStore(openDynamo, await openSqlite())
 }
+
+/** LINELEDGER_FALLBACK=off turns every self-hosted fallback off (store, alerts, agent model). Default: on. */
+export const fallbackOff = (env: NodeJS.ProcessEnv) => (env.LINELEDGER_FALLBACK ?? 'on').trim().toLowerCase() === 'off'

@@ -4,7 +4,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../server/app.js'
-import { cleanSubject, openNotifier, requireTopicArn, SnsNotifier, type AlertEvent } from '../server/notify.js'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { cleanSubject, FallbackNotifier, LocalNotifier, openNotifier, requireTopicArn, SnsNotifier, type AlertEvent } from '../server/notify.js'
 import { buildShiftReport } from '../server/report.js'
 import { SqliteStore } from '../server/store-sqlite.js'
 
@@ -21,10 +24,37 @@ describe('SnsNotifier', () => {
     expect(cleanSubject('  a \n b ')).toBe('a b')
   })
 
-  it('logs and swallows a publish failure', async () => {
+  it('throws on a failed publish, so a FallbackNotifier can take over', async () => {
+    await expect(new SnsNotifier({ send: vi.fn().mockRejectedValue(new Error('boom')) }, ARN).publish({ subject: 's', message: 'm' })).rejects.toThrow('boom')
+  })
+})
+
+describe('FallbackNotifier and LocalNotifier', () => {
+  const file = () => join(mkdtempSync(join(tmpdir(), 'lineledger-alerts-')), 'sub', 'alerts.jsonl')
+
+  it('sends to the local channel when SNS fails, and never throws', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await expect(new SnsNotifier({ send: vi.fn().mockRejectedValue(new Error('boom')) }, ARN).publish({ subject: 's', message: 'm' })).resolves.toBeUndefined()
-    expect(log).toHaveBeenCalled()
+    const path = file()
+    const sns = new SnsNotifier({ send: vi.fn().mockRejectedValue(new Error('down')) }, ARN)
+    await new FallbackNotifier(sns, new LocalNotifier(path)).publish({ subject: 'S', message: 'M' })
+    expect(JSON.parse(readFileSync(path, 'utf8').trim())).toMatchObject({ subject: 'S', message: 'M' })
+    log.mockRestore()
+  })
+
+  it('does not use the fallback while the primary works', async () => {
+    const path = file()
+    await new FallbackNotifier(new SnsNotifier({ send: vi.fn().mockResolvedValue({}) }, ARN), new LocalNotifier(path)).publish({ subject: 'S', message: 'M' })
+    expect(() => readFileSync(path)).toThrow()
+  })
+
+  it('posts to the webhook and survives a webhook that is down', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('ok')).mockRejectedValueOnce(new Error('refused'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const local = new LocalNotifier(file(), 'http://127.0.0.1:9/hook')
+    await local.publish({ subject: 'S', message: 'M' })
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toMatchObject({ subject: 'S', text: 'S\nM' })
+    await expect(local.publish({ subject: 'S', message: 'M' })).resolves.toBeUndefined()
+    fetchMock.mockRestore()
     log.mockRestore()
   })
 })
@@ -32,12 +62,19 @@ describe('SnsNotifier', () => {
 describe('openNotifier', () => {
   it('is off by default and refuses unknown modes', () => {
     expect(openNotifier({}).kind).toBe('none')
-    expect(() => openNotifier({ LINELEDGER_NOTIFY: 'sqs' })).toThrow(/none or sns/)
+    expect(() => openNotifier({ LINELEDGER_NOTIFY: 'sqs' })).toThrow(/none, local or sns/)
+    expect(openNotifier({ LINELEDGER_NOTIFY: 'local', LINELEDGER_ALERT_FILE: '/tmp/x.jsonl' }).kind).toBe('local')
   })
-  it('refuses a bad topic ARN and a missing project profile', () => {
+  it('refuses a bad topic ARN', () => {
     expect(() => requireTopicArn('arn:aws:sns:us-east-1:123:x')).toThrow(/not an SNS topic ARN/)
     expect(requireTopicArn(ARN).region).toBe('us-east-1')
-    expect(() => openNotifier({ LINELEDGER_NOTIFY: 'sns', LINELEDGER_SNS_TOPIC_ARN: ARN, AWS_PROFILE: 'default' })).toThrow(/AWS_PROFILE must be "lineledger"/)
+  })
+  it('without the project profile: falls back to local alerts, or refuses when fallback is off', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const env = { LINELEDGER_NOTIFY: 'sns', LINELEDGER_SNS_TOPIC_ARN: ARN, AWS_PROFILE: 'default', LINELEDGER_ALERT_FILE: '/tmp/x.jsonl' }
+    expect(openNotifier(env).kind).toBe('local')
+    expect(() => openNotifier({ ...env, LINELEDGER_FALLBACK: 'off' })).toThrow(/AWS_PROFILE must be "lineledger"/)
+    log.mockRestore()
   })
 })
 
