@@ -259,6 +259,20 @@ class LimitTests(unittest.TestCase):
         self.assertTrue(service.session_lost(SimpleNamespace(messages=[lost])))
         self.assertFalse(service.session_lost(SimpleNamespace(messages=[fine, {"role": "assistant", "content": [{"text": "ok"}]}])))
 
+    def test_runner_starts_without_the_mcp_server(self):
+        """The agent service can start first; the MCP session is opened on the first request."""
+        calls = []
+
+        def factory():
+            calls.append(1)
+            raise RuntimeError("mcp not up")
+
+        runner = service.AgentRunner(factory)
+        self.assertEqual(calls, [])
+        with self.assertRaises(RuntimeError):
+            runner.answer("hello")
+        self.assertEqual(calls, [1])
+
     def test_runner_rebuilds_the_agent_when_the_mcp_server_restarts(self):
         """A stateful MCP session dies with its server; the runner reconnects and retries once."""
         from strands import Agent

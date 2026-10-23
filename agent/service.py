@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from guard import (
@@ -55,6 +56,9 @@ SYSTEM_PROMPT = (
     "Rules for tool arguments: omit optional arguments the user did not state. Never pass shift_date or shift to get_shift_summary; call it with no arguments. "
     "Use the author \"Operator\" for a handover note when the user names no author. "
     "State only what the tool result says; do not add names or details. "
+    "For the state of all lines call get_live_line_status once with no arguments and use roll_up and each line's state; "
+    "for one line pass line_id. A line is running only when its state is RUN; say the plant time (sim_now) and the reason_code of any stopped line. "
+    "A sensor is above its limit only when value is at or above trip_limit (warn_limit for a warning). "
     "Answer in one or two short sentences suitable for speech."
 )
 
@@ -158,7 +162,7 @@ class AgentRunner:
         self.factory = factory or build_agent
         self.provider = provider
         self.lock = threading.Lock()
-        self.agent = self.factory()
+        self.agent: Agent | None = None  # built on the first request, so the agent can start before the MCP server
         self.last_used = time.monotonic()
         self.rebuilds = 0
 
@@ -167,13 +171,16 @@ class AgentRunner:
         self.agent = self.factory()
         self.rebuilds += 1
         try:
-            old.cleanup()
+            if old is not None:
+                old.cleanup()
         except Exception:  # noqa: BLE001  the old session may already be gone
             pass
 
     def answer(self, text: str):
         with self.lock:
-            if time.monotonic() - self.last_used > REBUILD_AFTER_IDLE_S:
+            if self.agent is None:
+                self.agent = self.factory()
+            elif time.monotonic() - self.last_used > REBUILD_AFTER_IDLE_S:
                 self.rebuild()
             for attempt in (1, 2):
                 self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
@@ -281,8 +288,20 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def warm_up_ollama() -> None:
+    """Loads the model into memory now and keeps it there, so the first question does not wait for the load."""
+    try:
+        body = json.dumps({"model": OLLAMA_MODEL, "keep_alive": "60m"}).encode()
+        urllib.request.urlopen(urllib.request.Request(f"{OLLAMA_HOST}/api/generate", body, {"content-type": "application/json"}), timeout=300).read()
+    except Exception as error:  # noqa: BLE001  Ollama may not be running yet; the first request then reports it
+        print(f"model warm-up skipped: {type(error).__name__}", file=sys.stderr, flush=True)
+
+
 if __name__ == "__main__":
+    assert_model_allowed(build_model(PROVIDER, MODEL_ID))  # refuse a wrong model or profile at startup, without needing the MCP server
     Handler.runner = AgentRunner()
+    if PROVIDER == "ollama" or FALLBACK:
+        threading.Thread(target=warm_up_ollama, daemon=True).start()
     where = "local Ollama" if PROVIDER == "ollama" else f"Amazon Bedrock, {REGION}, profile {PROJECT_PROFILE}"
     print(f"LineLedger agent ({MODEL_ID}, {where}) on http://127.0.0.1:{PORT}/chat")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
