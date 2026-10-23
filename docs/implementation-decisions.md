@@ -57,14 +57,23 @@ request; GET and DELETE on `/mcp` return 405. Persistent state lives in SQLite, 
 Reasons: simplest for a single-process demo, and the stateful path has an open client gotcha
 (no re-initialize after a 404, issue #1708). `scripts/mcp-preflight.ts` is written to this pattern.
 
-**D2 update, 2026-10-23: stateful mode added as an opt-in.** `LINELEDGER_STATEFUL=1` keeps one server and
-transport per session (`server/sessions.ts`). The default is still stateless, so the tested demo path did not
-change. The reason for the addition is server-to-client push: with sessions, one tab sees a note or follow-up
-written by another without polling. Checked on SDK 1.32.1: after the server drops a session, the plain SDK
-client fails every later call with a 404 and does not start a new session (the 2025-11-25 transport spec says
-a client must). `web/src/mcp.ts` therefore reconnects once on a 404 or a dead socket and retries, and shares
-one reconnect between concurrent calls. Sessions are in memory, so a restart loses them but never data.
-Not covered: the optional Python agent against stateful mode, and more than one server process.
+**Superseded on 2026-10-23 by D2b.** Stateless stays available as `LINELEDGER_MCP_MODE=stateless`.
+
+## D2b. Stateful Streamable HTTP with server push (2026-10-23)
+
+One `McpServer` and one `StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID })` per MCP
+session, kept in an in-memory registry (`SessionRegistry` in `server/app.ts`). `initialize` without a
+session id creates a session; POST, GET (event stream) and DELETE with `Mcp-Session-Id` are routed to it;
+a missing id gets 400, an unknown one 404. Sessions idle for 30 minutes are closed; past 100 sessions the
+least recently used one is closed. Reasons: the plant simulation (D13) changes every second,
+and a session is what lets the server push `notifications/resources/updated` for subscribed resources
+instead of the page polling. Data still lives in the store, not in sessions.
+The client gotcha noted in D2 (no re-initialize after a 404, issue #1708) is handled on our side: the web
+client (`web/src/mcp.ts`) and the agent (`AgentRunner` in `agent/service.py`) open a new session and retry
+once. A note or follow-up written in one session is also announced to every other session as a logging notice
+(`data_changed`, with the resource name), so a second tab refreshes its lists without polling; `server/sessions.ts`
+from the earlier opt-in design (`LINELEDGER_STATEFUL=1`) was dropped in favour of this registry.
+Cost: sessions are per process, so no scale-out or serverless deploy in this mode.
 
 ## D3. Browser client
 
@@ -161,6 +170,48 @@ controls. See `docs/ui-spec.md`.
   employer-linked account, so `gh repo create` is not used. The repository is created under TXC2HYDRA and
   pushed over SSH with the personal key.
 - `LICENSE` is MIT with holder "LineLedger contributors". Replace with a legal name if wanted.
+
+## D11. Optional Amazon Bedrock model for the agent (2026-10-22)
+
+`LINELEDGER_MODEL_PROVIDER=bedrock` builds a Strands `BedrockModel` with an Amazon Nova model only, through
+the project-only profile in `~/.aws-lineledger/`. Ollama stays the default. Details and guards:
+`docs/aws-integration-plan.md`, `agent/guard.py`.
+
+## D12. Store interface; optional Amazon DynamoDB store (2026-10-22)
+
+The tools call an async `Store` (`server/store.ts`) with a SQLite implementation (default) and a DynamoDB
+one (`LINELEDGER_STORE=dynamodb`, one provisioned 5/5 table). Every server test runs on both.
+
+## D13. Tarnby Works plant simulation (2026-10-23)
+
+Built from the handoff `docs/simulation_context.md`, reshaped to the time left (author's choice):
+
+- D-LINES: seven lines, shifts A and B on all lines and C on Lines 2 and 4, about 100 people, as data in
+  `plant/plant.json` (lines, stations, cycles, targets, MTBF, MTTR, reject and downtime mixes, bill of
+  materials, stock, story).
+- D-PROFILE: the plant only with `LINELEDGER_PLANT=1` (own `data/plant.sqlite` by default); the two-line seed,
+  the tests and the older docs are unchanged without it.
+- D-CLOCK: simulated clock x120 by default, a x300 time-lapse stretch from 14:10 to 16:15 and optional 12 s
+  presenter holds, always shown on a clock chip.
+- D-READONLY: LineLedger never controls equipment. The first version's `inject_fault`, `clear_fault` and
+  `set_line_running` tools were removed; faults come from the random model and the scripted story.
+  `receive_stock` stays as a goods receipt, a business record.
+- D-INPROCESS (instead of D-TRANSPORT): the simulation runs inside the server and writes to the store; the
+  handoff's separate simulator with a WebSocket telemetry channel and signed webhooks was not built. The
+  integration boundary for a real gateway would be an ingest endpoint; that is future work.
+- D-NOSEED: the plant profile (`LINELEDGER_PLANT=1`) opens its store without the two-line demo rows (notes,
+  follow-ups, hand-written shift trend). A fresh plant store gets seven simulated days of shift history
+  (`FactorySim.history`) before the story day. Night-shift (C) targets for Lines 2 and 4 were raised to the day
+  targets (800 and 940), because the simulated history showed them at 110 to 155 percent.
+- D-RESUME: with every flush the simulation saves its live state (gzipped JSON, about 6 KB, `Store.putSimState`; table
+  `sim_state` in SQLite, item META/sim-state in DynamoDB) and `FactorySim.create` resumes from it when the seed
+  matches. The mulberry32 streams expose their state, so a resumed run draws the same numbers as an unbroken run
+  (tested). The clock is paused while the server is down. Older databases without saved state keep the previous
+  rule: continue with the shift after the latest on record. A plant database from before D-NOSEED loses exactly
+  the seeded demo rows at startup (`SqliteStore.dropDemoSeed`, SQLite only).
+- D-STATEFUL: shipped (D2b), so the dashboard is pushed `plant://snapshot` updates instead of polling.
+- Determinism: one simulated minute per step whatever the real tick size; per-line random substreams;
+  seed 1 meets the story checks (`npm run plant:story-check`).
 
 ## Open VERIFY list
 

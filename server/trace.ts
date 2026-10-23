@@ -14,7 +14,7 @@ export class TraceTap {
   private nextId = 1
   private listeners = new Set<(entry: TraceEntry) => void>()
 
-  constructor(private readonly max = 500) {}
+  constructor(private readonly max = 2000) {} // stateful push adds a notification and a read per update
 
   record(dir: 'in' | 'out', message: unknown): TraceEntry {
     const entry: TraceEntry = { id: this.nextId++, ts: new Date().toISOString(), dir, message }

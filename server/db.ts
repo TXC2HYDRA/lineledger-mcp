@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   created_at TEXT NOT NULL,
   closed_at TEXT
 );
+CREATE TABLE IF NOT EXISTS sim_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stock_items (
   sku TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -78,7 +81,8 @@ function seedHistoryRows(db: Db): void {
   for (const r of seedHistory()) insert.run(r.line_id, r.shift_date, r.shift, r.target_units, r.produced_units, r.downtime_min)
 }
 
-export function openDb(path = ':memory:'): Db {
+/** `seed: false` leaves the database empty of demo rows (the plant profile fills it from the simulation). */
+export function openDb(path = ':memory:', { seed: seedDemo = true }: { seed?: boolean } = {}): Db {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new DatabaseSync(path)
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;')
@@ -87,8 +91,10 @@ export function openDb(path = ':memory:'): Db {
   db.exec('BEGIN IMMEDIATE')
   try {
     const { n } = db.prepare('SELECT COUNT(*) AS n FROM lines').get() as { n: number }
-    if (n === 0) seed(db)
-    seedHistoryRows(db)
+    if (seedDemo) {
+      if (n === 0) seed(db)
+      seedHistoryRows(db)
+    }
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')

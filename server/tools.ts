@@ -2,8 +2,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { planContainerLoad } from 'container-load-planner'
 import * as z from 'zod/v4'
+import type { FactorySim } from './sim.js'
 import { noNotifier, type Notifier } from './notify.js'
-import { lineStatus, percentOf, stockStatus } from './rules.js'
+import { lineStatus, stockStatus } from './rules.js'
 import type { Store } from './store.js'
 
 const ok = (data: Record<string, unknown>): CallToolResult => ({
@@ -37,9 +38,11 @@ const followUpShape = {
 /** What a write tool changed. Stateful mode pushes this to every connected session. */
 export type ChangeResource = 'follow_ups' | 'handover_notes'
 
+/** `sim` (plant profile only) adds live data: the in-progress shift's counts and pace, and days of stock cover. */
 export function registerTools(
   server: McpServer,
   store: Store,
+  sim?: FactorySim,
   notifier: Notifier = noNotifier,
   onChange: (resource: ChangeResource) => void = () => {},
 ): void {
@@ -48,7 +51,9 @@ export function registerTools(
     {
       title: 'Shift summary',
       description:
-        'Output versus target for every production line in one shift. Defaults to the latest shift on record. All data is synthetic.',
+        'Output versus target for every production line in one shift. Defaults to the latest shift on record, which is the shift in ' +
+        'progress when the plant simulation runs; then each line also has target_to_date and percent_of_pace (output against the target ' +
+        'so far), and status follows pace. All data is synthetic.',
       inputSchema: {
         shift_date: z.iso.date().optional().describe('YYYY-MM-DD. Default: latest date on record'),
         shift: z.enum(['A', 'B', 'C']).optional().describe('Shift letter. Default: latest shift of that date'),
@@ -66,9 +71,13 @@ export function registerTools(
             percent_of_target: z.number(),
             downtime_min: z.number(),
             status: z.enum(['on_track', 'at_risk', 'behind']),
+            in_progress: z.boolean(),
+            target_to_date: z.number(),
+            percent_of_pace: z.number(),
           }),
         ),
-        totals: z.object({ target_units: z.number(), produced_units: z.number(), percent_of_target: z.number() }),
+        in_progress: z.boolean(),
+        totals: z.object({ target_units: z.number(), produced_units: z.number(), percent_of_target: z.number(), target_to_date: z.number(), percent_of_pace: z.number() }),
       },
       annotations: READ,
     },
@@ -77,26 +86,38 @@ export function registerTools(
       if (!found) return fail('No shift data for that date and shift.')
       const latest = { shift_date: found.shift_date, shift: found.shift }
       const rows = await store.shiftLines(latest.shift_date, latest.shift)
-      const pct = percentOf
+      const pct = (produced: number, target: number) => (target > 0 ? Math.round((produced / target) * 1000) / 10 : 100)
+      // The shift in progress: the store row lags up to 15 simulated minutes, so live counts replace it.
+      const live = sim?.liveShift()
+      const inProgress = live !== undefined && live.shift_date === latest.shift_date && live.shift === latest.shift
       const lines = rows.map((r) => {
-        const percent = pct(r.produced_units, r.target_units)
+        const now = inProgress ? live.lines.get(r.line_id) : undefined
+        const produced = now?.produced_units ?? r.produced_units
+        const targetToDate = now ? now.target_to_date : r.target_units
+        const pace = pct(produced, targetToDate)
+        const stoppedLong = now !== undefined && ['STOP_FAULT', 'STOP_OTHER', 'IDLE_STARVED'].includes(now.state) && now.minutes_in_state > 15
         return {
           line_id: r.line_id,
           name: r.name,
           product: r.product,
           target_units: r.target_units,
-          produced_units: r.produced_units,
-          percent_of_target: percent,
-          downtime_min: r.downtime_min,
-          status: lineStatus(percent),
+          produced_units: produced,
+          percent_of_target: pct(produced, r.target_units),
+          downtime_min: now?.downtime_min ?? r.downtime_min,
+          status: stoppedLong ? ('behind' as const) : lineStatus(now ? pace : pct(produced, r.target_units)),
+          in_progress: now !== undefined,
+          target_to_date: targetToDate,
+          percent_of_pace: pace,
         }
       })
       const target = lines.reduce((sum, l) => sum + l.target_units, 0)
       const produced = lines.reduce((sum, l) => sum + l.produced_units, 0)
+      const targetToDate = lines.reduce((sum, l) => sum + l.target_to_date, 0)
       return ok({
         ...latest,
         lines,
-        totals: { target_units: target, produced_units: produced, percent_of_target: pct(produced, target) },
+        in_progress: inProgress,
+        totals: { target_units: target, produced_units: produced, percent_of_target: pct(produced, target), target_to_date: targetToDate, percent_of_pace: pct(produced, targetToDate) },
       })
     },
   )
@@ -106,13 +127,15 @@ export function registerTools(
     {
       title: 'Shift history',
       description:
-        'Percent of target per line for the most recent shifts, oldest first. Use it for trends. All data is synthetic.',
+        'Percent of target per line for the most recent shifts, oldest first. Use it for trends. With the plant simulation the last ' +
+        'shift may be the one in progress (in_progress true; its percent is of the full-shift target). All data is synthetic.',
       inputSchema: { limit: z.number().int().min(2).max(60).default(14).describe('How many recent shifts to return') },
       outputSchema: {
         shifts: z.array(
           z.object({
             shift_date: z.string(),
             shift: z.string(),
+            in_progress: z.boolean(),
             lines: z.array(z.object({ line_id: z.string(), name: z.string(), percent_of_target: z.number() })),
           }),
         ),
@@ -121,11 +144,13 @@ export function registerTools(
     },
     async ({ limit }) => {
       const rows = await store.recentShifts(limit)
-      type Entry = { shift_date: string; shift: string; lines: { line_id: string; name: string; percent_of_target: number }[] }
+      type Entry = { shift_date: string; shift: string; in_progress: boolean; lines: { line_id: string; name: string; percent_of_target: number }[] }
+      const live = sim?.liveShift()
       const byShift = new Map<string, Entry>() // Map keeps insertion order, and the query is already oldest first
       for (const r of rows) {
         const key = `${r.shift_date}|${r.shift}`
-        const entry = byShift.get(key) ?? { shift_date: r.shift_date, shift: r.shift, lines: [] }
+        const inProgress = live !== undefined && live.shift_date === r.shift_date && live.shift === r.shift
+        const entry = byShift.get(key) ?? { shift_date: r.shift_date, shift: r.shift, in_progress: inProgress, lines: [] }
         byShift.set(key, entry)
         entry.lines.push({ line_id: r.line_id, name: r.name, percent_of_target: Math.round((r.produced_units / r.target_units) * 1000) / 10 })
       }
@@ -252,6 +277,7 @@ export function registerTools(
             reorder_point: z.number(),
             status: z.enum(['ok', 'reorder', 'out_of_stock']),
             suggested_order_qty: z.number(),
+            days_cover: z.number().nullable().describe('On hand divided by the use over the last 24 simulated hours; null without the plant simulation'),
             lead_days: z.number(),
             supplier: z.string(),
           }),
@@ -262,7 +288,7 @@ export function registerTools(
     async ({ query }) => {
       const rows = await store.findStock(query)
       const items = rows.map((r) => {
-        const onHand = r.on_hand
+        const onHand = sim?.onHand(r.sku) ?? r.on_hand // live while the plant simulation runs (the store lags up to 15 sim-min)
         const status = stockStatus(onHand, r.reorder_point)
         return {
           sku: r.sku,
@@ -274,6 +300,7 @@ export function registerTools(
           suggested_order_qty: status === 'ok' ? 0 : r.reorder_qty,
           lead_days: r.lead_days,
           supplier: r.supplier,
+          days_cover: sim?.daysCover(r.sku) ?? null,
         }
       })
       return ok({ items })

@@ -2,26 +2,45 @@ import { request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { LoggingMessageNotificationSchema, ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../server/app.js'
+import { createApp, type AppOptions } from '../server/app.js'
+import { applyPlantSeed } from '../server/plant.js'
+import { FactorySim } from '../server/sim.js'
 import type { Store } from '../server/store.js'
 import { TraceTap } from '../server/trace.js'
 import { HARNESSES } from './harness.js'
 
 const ORIGIN = 'http://localhost:5173'
 let http: Server
+let app: ReturnType<typeof createApp>
 let store: Store
+let sim: FactorySim | undefined
 let trace: TraceTap
 let url: string
 const clients: Client[] = []
 
-async function start(database: Store) {
+// Seed profile by default (two lines, no simulation). { plant: true } adds the Tarnby Works plant and its
+// simulation, without its timer: tests advance it explicitly.
+async function start(database: Store, options: Partial<AppOptions> & { plant?: boolean } = {}) {
   trace = new TraceTap()
-  const app = createApp({ store: database, trace, allowedOrigins: [ORIGIN] })
+  sim = undefined
+  if (options.plant) {
+    await applyPlantSeed(database)
+    sim = await FactorySim.create(database)
+  }
+  app = createApp({ store: database, sim, trace, allowedOrigins: [ORIGIN], notifyEveryMs: 50, ...options })
   http = await new Promise<Server>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
   })
   url = `http://127.0.0.1:${(http.address() as AddressInfo).port}`
+}
+
+async function stop() {
+  await Promise.all(clients.splice(0).map((c) => c.close()))
+  await app.sessions.closeAll()
+  http.closeAllConnections()
+  http.close()
 }
 
 async function connect() {
@@ -45,8 +64,7 @@ beforeEach(async () => {
   await start(store)
 })
 afterEach(async () => {
-  await Promise.all(clients.splice(0).map((c) => c.close()))
-  http.close()
+  await stop()
   await h.dispose(store)
 })
 
@@ -70,15 +88,212 @@ describe('protocol', () => {
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, degraded: false, stateful: false, sessions: 0 })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, degraded: false, mcp: 'stateful', simulation: false, sessions: 0 })
+    await connect()
+    expect(await (await fetch(`${url}/api/health`)).json()).toMatchObject({ sessions: 1 })
   })
 
-  it('returns 405 on GET and DELETE /mcp', async () => {
+  it('offers no resources in the seed profile', async () => {
+    const { client } = await connect()
+    expect(client.getServerCapabilities()?.resources).toBeUndefined()
+    await expect(client.listResources()).rejects.toThrow(/Method not found/)
+  })
+})
+
+describe('stateful sessions', () => {
+  const initBody = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+  })
+  const headers = (extra: Record<string, string> = {}) => ({ 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...extra })
+
+  it('gives each client its own session id and keeps it across calls', async () => {
+    const a = await connect()
+    const b = await connect()
+    expect(a.transport.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(b.transport.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(a.transport.sessionId).not.toBe(b.transport.sessionId)
+    expect(app.sessions.size).toBe(2)
+    expect((await call(a.client, 'check_stock', { query: 'steel' })).isError).toBeFalsy()
+    expect((await call(b.client, 'check_stock', { query: 'steel' })).isError).toBeFalsy()
+    expect(app.sessions.size).toBe(2) // later calls reuse the sessions
+  })
+
+  it('rejects requests without a session (400) and with an unknown session (404)', async () => {
+    const list = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers(), body: list })).status).toBe(400)
+    const unknown = { 'mcp-session-id': '00000000-0000-4000-8000-000000000000' }
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers(unknown), body: list })).status).toBe(404)
+    for (const method of ['GET', 'DELETE']) {
+      expect((await fetch(`${url}/mcp`, { method })).status, method).toBe(400)
+      expect((await fetch(`${url}/mcp`, { method, headers: unknown })).status, method).toBe(404)
+    }
+  })
+
+  it('initialize over raw HTTP returns the session id header', async () => {
+    const res = await fetch(`${url}/mcp`, { method: 'POST', headers: headers(), body: initBody })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('mcp-session-id')).toMatch(/^[0-9a-f-]{36}$/)
+    await res.text()
+  })
+
+  it('DELETE ends the session; the old id is then unknown', async () => {
+    const { client, transport } = await connect()
+    const id = transport.sessionId!
+    await transport.terminateSession()
+    expect(app.sessions.size).toBe(0)
+    const list = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' })
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers({ 'mcp-session-id': id }), body: list })).status).toBe(404)
+    await expect(client.listTools()).rejects.toThrow()
+  })
+
+  it('closes idle sessions and the least recently used one past the cap', async () => {
+    await stop()
+    await start(store, { sessionIdleMs: 300, maxSessions: 2 })
+    const first = await connect()
+    await connect()
+    await connect() // over the cap: the first session is closed
+    await new Promise((r) => setTimeout(r, 20))
+    expect(app.sessions.size).toBe(2)
+    await expect(first.client.listTools()).rejects.toThrow()
+    await new Promise((r) => setTimeout(r, 700))
+    expect(app.sessions.size).toBe(0) // idle for longer than 300 ms
+  })
+
+  it('pushes plant snapshot updates to subscribed sessions only', async () => {
+    await stop()
+    await start(store, { plant: true })
+    const watcher = await connect()
+    const other = await connect()
+    const seen: string[] = []
+    const otherSeen: string[] = []
+    watcher.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void seen.push(n.params.uri))
+    other.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void otherSeen.push(n.params.uri))
+    await watcher.client.subscribeResource({ uri: 'plant://snapshot' })
+    await expect(watcher.client.subscribeResource({ uri: 'plant://nothing' })).rejects.toThrow(/Unknown resource/)
+    await new Promise((r) => setTimeout(r, 200)) // the GET event stream opens after initialize
+    await sim!.advance(60_000)
+    await expect.poll(() => seen, { timeout: 3000 }).toEqual(['plant://snapshot'])
+    expect(otherSeen).toEqual([])
+    const snapshot = JSON.parse(((await watcher.client.readResource({ uri: 'plant://snapshot' })).contents[0] as { text: string }).text)
+    expect(snapshot).toMatchObject({ synthetic: true, company: 'Tarnby Works', sim_clock: { sim_now: '2026-10-22 12:56' } })
+    // the push went out on the session's GET stream and shows in the trace
+    const { entries } = (await (await fetch(`${url}/api/trace`)).json()) as { entries: { dir: string; message: any }[] }
+    expect(entries.some((e) => e.dir === 'out' && e.message.method === 'notifications/resources/updated')).toBe(true)
+    await watcher.client.unsubscribeResource({ uri: 'plant://snapshot' })
+    seen.length = 0
+    await sim!.advance(60_000)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(seen).toEqual([])
+  })
+
+  it('tells the other sessions when a note or follow-up is written', async () => {
+    const watcher = await connect()
+    const seen: { event: string; resource: string }[] = []
+    watcher.client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => void seen.push(n.params.data as { event: string; resource: string }))
+    const writer = await connect()
+    await new Promise((r) => setTimeout(r, 200)) // the GET event stream opens after initialize
+    await call(writer.client, 'create_follow_up', { title: 'Recheck guard', owner: 'Ravi' })
+    await call(writer.client, 'create_handover_note', { author: 'Test', text: 'Belt tension low' })
+    await call(writer.client, 'list_follow_ups', {}) // a read announces nothing
+    await expect.poll(() => seen, { timeout: 3000 }).toEqual([
+      { event: 'data_changed', resource: 'follow_ups' },
+      { event: 'data_changed', resource: 'handover_notes' },
+    ])
+  })
+
+  it('still serves every tool in the optional stateless mode', async () => {
+    await stop()
+    await start(store, { mode: 'stateless', plant: true })
+    const { client, transport } = await connect()
+    expect(transport.sessionId).toBeUndefined()
+    expect((await client.listTools()).tools).toHaveLength(12)
+    expect((await call(client, 'get_live_line_status', { line_id: 'L2' })).structuredContent!.lines).toHaveLength(1)
     for (const method of ['GET', 'DELETE']) {
       const res = await fetch(`${url}/mcp`, { method })
       expect(res.status).toBe(405)
       expect(res.headers.get('allow')).toBe('POST')
     }
+  })
+})
+
+describe('plant profile (Tarnby Works simulation)', () => {
+  beforeEach(async () => {
+    await stop()
+    await start(store, { plant: true })
+  })
+
+  it('adds the live tools and the snapshot resource, and no tool that controls a line', async () => {
+    const { client } = await connect()
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).toHaveLength(12)
+    expect(names).toEqual(expect.arrayContaining(['get_live_line_status', 'get_factory_events', 'receive_stock']))
+    for (const control of ['inject_fault', 'clear_fault', 'set_line_running']) expect(names).not.toContain(control)
+    expect((await client.listResources()).resources.map((r) => r.uri)).toEqual(['plant://snapshot'])
+    expect(await (await fetch(`${url}/api/health`)).json()).toMatchObject({ simulation: true })
+  })
+
+  it('answers the live questions through the story: running, why down, how long, sealer temperature', async () => {
+    const { client } = await connect()
+    const live = async (args: Record<string, unknown> = {}) => (await call(client, 'get_live_line_status', args)).structuredContent!
+    const now = await live()
+    expect(now).toMatchObject({ sim_now: '2026-10-22 12:55', shift: { date: '2026-10-22', shift: 'A', lead: 'Asha' } })
+    expect(now.lines).toHaveLength(7)
+    expect(now.roll_up.RUN).toBeGreaterThanOrEqual(6)
+    let l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2).toMatchObject({ line_id: 'L2', state: 'RUN', crew: 4 })
+    expect(l2.signals[0]).toMatchObject({ tag: 'M3.sealer_jaw_temp_c', unit: '°C', warn_limit: 190, trip_limit: 200 })
+
+    await sim!.advance(20 * 60_000) // 13:15: the jaw is over its warn limit, the line still runs
+    l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2.state).toBe('RUN')
+    expect(l2.signals[0].value).toBeGreaterThanOrEqual(190)
+    expect(l2.open_alarms.map((a: { code: string }) => a.code)).toEqual(['M3-TEMP-HI'])
+
+    await sim!.advance(12 * 60_000) // 13:27: tripped at 13:23
+    l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2).toMatchObject({ state: 'STOP_FAULT', reason_code: 'SEALER_FAULT', since: '2026-10-22 13:23', minutes_in_state: 4 })
+    expect(l2.open_alarms.map((a: { code: string }) => a.code)).toEqual(['M3-TEMP-HI', 'M3-HEAT-OVR'])
+    expect(l2.signals[0].value).toBeGreaterThan(200)
+    const events = (await call(client, 'get_factory_events', { line_id: 'L2', limit: 50 })).structuredContent!.events as { kind: string; message: string }[]
+    expect(events.map((e) => e.kind)).toEqual(expect.arrayContaining(['stop', 'alarm', 'quality_check']))
+    expect(events.find((e) => e.kind === 'quality_check')!.message).toMatch(/seal peel/)
+  })
+
+  it('shift summary of the shift in progress carries pace, and the finished shift is stored', async () => {
+    const { client } = await connect()
+    const summary = (await call(client, 'get_shift_summary')).structuredContent!
+    expect(summary).toMatchObject({ shift_date: '2026-10-22', shift: 'A', in_progress: true })
+    expect(summary.lines).toHaveLength(7)
+    const l1 = summary.lines[0]
+    expect(l1.in_progress).toBe(true)
+    expect(l1.target_to_date).toBeLessThan(l1.target_units)
+    expect(l1.percent_of_pace).toBeGreaterThan(l1.percent_of_target)
+    await sim!.advance(66 * 60_000) // to 14:01: shift A has ended, B is in progress
+    const a = (await call(client, 'get_shift_summary', { shift_date: '2026-10-22', shift: 'A' })).structuredContent!
+    expect(a.in_progress).toBe(false)
+    expect(a.lines.find((l: { line_id: string }) => l.line_id === 'L2')).toMatchObject({ produced_units: 678, status: 'at_risk' })
+    expect((await call(client, 'get_shift_summary')).structuredContent).toMatchObject({ shift: 'B', in_progress: true })
+    const history = (await call(client, 'get_shift_history', { limit: 3 })).structuredContent!.shifts
+    expect(history.map((s: { shift: string; in_progress: boolean }) => `${s.shift} ${s.in_progress}`)).toEqual(['B false', 'A false', 'B true'])
+  })
+
+  it('stock shows live levels and days of cover; a goods receipt adds to it', async () => {
+    const { client } = await connect()
+    const band = (await call(client, 'check_stock', { query: 'heater band' })).structuredContent!.items[0]
+    expect(band).toMatchObject({ sku: 'HTR-BAND', on_hand: 3, status: 'ok' })
+    await sim!.advance(64 * 60_000) // 13:59: the band was swapped at 13:58
+    expect((await call(client, 'check_stock', { query: 'heater band' })).structuredContent!.items[0]).toMatchObject({ on_hand: 2, status: 'reorder', suggested_order_qty: 6 })
+    const hdpe = (await call(client, 'check_stock', { query: 'hdpe' })).structuredContent!.items[0]
+    expect(hdpe.days_cover).toBeGreaterThan(1)
+    expect(hdpe.on_hand).toBeLessThan(20400)
+    const r = await call(client, 'receive_stock', { sku: 'htr-band', quantity: 6 })
+    expect(r.structuredContent).toMatchObject({ sku: 'HTR-BAND', on_hand: 8 })
+    expect((await call(client, 'check_stock', { query: 'HTR' })).structuredContent!.items[0]).toMatchObject({ on_hand: 8, status: 'ok' })
+    expect((await call(client, 'receive_stock', { sku: 'NOPE', quantity: 1 })).content[0]!.text).toMatch(/Unknown SKU/)
+    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 0 })).isError).toBe(true)
   })
 })
 
@@ -135,13 +350,11 @@ describe('tools', () => {
     const storage = await h.reopenable()
     try {
       const first = await storage.open()
-      http.close()
+      await stop()
       await start(first)
       const { client } = await connect()
       await call(client, 'create_handover_note', { author: 'Test', text: 'Persist me' })
-      await client.close()
-      clients.length = 0
-      http.close()
+      await stop()
       await first.close()
 
       const second = await storage.open()
@@ -150,9 +363,7 @@ describe('tools', () => {
       const notes = (await call(again.client, 'list_handover_notes', { limit: 50 })).structuredContent!.notes
       expect(notes.some((n: { text: string }) => n.text === 'Persist me')).toBe(true)
       expect(notes).toHaveLength(3) // 2 seeded once, not reseeded, plus the new one
-      await again.client.close()
-      clients.length = 0
-      http.close()
+      await stop()
       await second.close()
     } finally {
       await storage.cleanup()

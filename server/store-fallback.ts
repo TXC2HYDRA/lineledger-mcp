@@ -5,7 +5,7 @@
 //
 // ponytail: the two stores are not synced. Rows written while the primary is down exist only in the
 // secondary, and the primary's rows are not visible then. Add a replay/sync step if that matters.
-import type { FollowUpRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store, StoreKind } from './store.js'
+import type { FollowUpRow, LineRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store, StoreKind } from './store.js'
 
 export interface FallbackOptions {
   cooldownMs?: number
@@ -80,6 +80,12 @@ export class FallbackStore implements Store {
   listFollowUps = (filter: Parameters<Store['listFollowUps']>[0]): Promise<FollowUpRow[]> => this.run((s) => s.listFollowUps(filter))
   closeFollowUp = (id: number, closed_at: string) => this.run((s) => s.closeFollowUp(id, closed_at))
   findStock = (query: string): Promise<StockRow[]> => this.run((s) => s.findStock(query))
+  putShiftOutput = (row: ShiftOutputRow) => this.run((s) => s.putShiftOutput(row))
+  setStockOnHand = (sku: string, onHand: number) => this.run((s) => s.setStockOnHand(sku, onHand))
+  getSimState = () => this.run((s) => s.getSimState())
+  putSimState = (json: string) => this.run((s) => s.putSimState(json))
+  addLine = (line: LineRow) => this.run((s) => s.addLine(line))
+  putStockItem = (item: StockRow) => this.run((s) => s.putStockItem(item))
 
   async close(): Promise<void> {
     await Promise.allSettled([this.primary?.close(), this.secondary.close()])

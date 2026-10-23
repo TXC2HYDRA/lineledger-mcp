@@ -76,6 +76,16 @@ export interface Store {
   closeFollowUp(id: number, closed_at: string): Promise<FollowUpRow | 'not_found' | 'already_closed'>
   /** Case-insensitive substring match on SKU or name, ordered by SKU. */
   findStock(query: string): Promise<StockRow[]>
+  /** Insert or replace one shift result (the simulation writes one per line at each shift end). */
+  putShiftOutput(row: ShiftOutputRow): Promise<void>
+  setStockOnHand(sku: string, onHand: number): Promise<void>
+  /** The simulation's saved live state (plant profile), a JSON text written with every flush, so a restart resumes mid-shift. */
+  getSimState(): Promise<string | undefined>
+  putSimState(json: string): Promise<void>
+  /** Insert a line if it does not exist yet (plant profile). */
+  addLine(line: LineRow): Promise<void>
+  /** Insert or replace a stock item (plant profile). */
+  putStockItem(item: StockRow): Promise<void>
   close(): Promise<void>
 }
 
@@ -91,13 +101,16 @@ export function storeKind(value: string | undefined): StoreKind {
 
 /**
  * Opens the store named by LINELEDGER_STORE (default sqlite). The DynamoDB module loads only when asked for.
- * With dynamodb, the SQLite file is the fallback unless LINELEDGER_FALLBACK=off (see store-fallback.ts).
+ * With dynamodb, the SQLite file is the fallback unless LINELEDGER_FALLBACK=off or the plant profile runs (see store-fallback.ts).
  */
 export async function openStore(env: NodeJS.ProcessEnv = process.env): Promise<Store> {
-  const openSqlite = async () => (await import('./store-sqlite.js')).SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite')
+  // The plant profile keeps no hand-written demo rows: its shifts, stock and trend come from the simulation.
+  const openSqlite = async () =>
+    (await import('./store-sqlite.js')).SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite', { seed: env.LINELEDGER_PLANT !== '1' })
   if (storeKind(env.LINELEDGER_STORE) !== 'dynamodb') return openSqlite()
   const openDynamo = async () => (await import('./store-dynamodb.js')).openDynamoDbStore(env)
-  if (fallbackOff(env)) return openDynamo()
+  // The plant profile saves its live state in the store, so a silent switch to a second, unsynced store would split it.
+  if (fallbackOff(env) || env.LINELEDGER_PLANT === '1') return openDynamo()
   const { FallbackStore } = await import('./store-fallback.js')
   return new FallbackStore(openDynamo, await openSqlite())
 }

@@ -1,14 +1,15 @@
 // Default store: one node:sqlite file. The SQL is the same the tools used before the store interface existed.
 import { openDb, type Db } from './db.js'
-import type { FollowUpRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store } from './store.js'
+import { SEED_FOLLOW_UPS, SEED_NOTES, SEED_SHIFT_OUTPUT, seedHistory } from './seed.js'
+import type { FollowUpRow, LineRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store } from './store.js'
 
 export class SqliteStore implements Store {
   readonly kind = 'sqlite' as const
 
   constructor(readonly db: Db) {}
 
-  static open(path = ':memory:'): SqliteStore {
-    return new SqliteStore(openDb(path))
+  static open(path = ':memory:', options: { seed?: boolean } = {}): SqliteStore {
+    return new SqliteStore(openDb(path, options))
   }
 
   async lineExists(id: string): Promise<boolean> {
@@ -95,6 +96,49 @@ export class SqliteStore implements Store {
          WHERE instr(lower(sku), lower(?1)) > 0 OR instr(lower(name), lower(?1)) > 0 ORDER BY sku`,
       )
       .all(query) as unknown as StockRow[]
+  }
+
+  async putShiftOutput(r: ShiftOutputRow): Promise<void> {
+    this.db
+      .prepare('INSERT OR REPLACE INTO shift_output (line_id, shift_date, shift, target_units, produced_units, downtime_min) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(r.line_id, r.shift_date, r.shift, r.target_units, r.produced_units, r.downtime_min)
+  }
+
+  async setStockOnHand(sku: string, onHand: number): Promise<void> {
+    this.db.prepare('UPDATE stock_items SET on_hand = ? WHERE sku = ?').run(onHand, sku)
+  }
+
+  async addLine(l: LineRow): Promise<void> {
+    this.db.prepare('INSERT OR IGNORE INTO lines (id, name, product) VALUES (?, ?, ?)').run(l.id, l.name, l.product)
+  }
+
+  async putStockItem(s: StockRow): Promise<void> {
+    this.db
+      .prepare('INSERT OR REPLACE INTO stock_items (sku, name, unit, on_hand, reorder_point, reorder_qty, lead_days, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.sku, s.name, s.unit, s.on_hand, s.reorder_point, s.reorder_qty, s.lead_days, s.supplier)
+  }
+
+  async getSimState(): Promise<string | undefined> {
+    return (this.db.prepare('SELECT json FROM sim_state WHERE id = 1').get() as { json: string } | undefined)?.json
+  }
+
+  async putSimState(json: string): Promise<void> {
+    this.db.prepare('INSERT INTO sim_state (id, json) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json').run(json)
+  }
+
+  /**
+   * A plant database made before the plant profile dropped the two-line demo data still holds those rows.
+   * Removes exactly the seeded notes, follow-ups and shift rows. True when it removed any.
+   */
+  dropDemoSeed(): boolean {
+    let removed = 0
+    const run = (sql: string, ...args: (string | number)[]) => (removed += Number(this.db.prepare(sql).run(...args).changes))
+    for (const n of SEED_NOTES) run('DELETE FROM handover_notes WHERE author = ? AND text = ? AND created_at = ?', n.author, n.text, n.created_at)
+    for (const f of SEED_FOLLOW_UPS) run('DELETE FROM follow_ups WHERE title = ? AND owner = ? AND created_at = ?', f.title, f.owner, f.created_at)
+    for (const r of [...SEED_SHIFT_OUTPUT, ...seedHistory()]) {
+      run('DELETE FROM shift_output WHERE line_id = ? AND shift_date = ? AND shift = ? AND produced_units = ?', r.line_id, r.shift_date, r.shift, r.produced_units)
+    }
+    return removed > 0
   }
 
   async close(): Promise<void> {

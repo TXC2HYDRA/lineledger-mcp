@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-// The browser client must keep working against the default (stateless) server: no session, no reconnect.
+// The browser client must keep working against the optional stateless server (LINELEDGER_MCP_MODE=stateless): no session, no reconnect.
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, expect, it } from 'vitest'
@@ -13,7 +13,7 @@ let http: Server
 beforeEach(async () => {
   store = SqliteStore.open()
   http = await new Promise<Server>((resolve) => {
-    const s = createApp({ store, allowedOrigins: [] }).listen(0, '127.0.0.1', () => resolve(s))
+    const s = createApp({ store, allowedOrigins: [], mode: 'stateless' }).listen(0, '127.0.0.1', () => resolve(s))
   })
 })
 afterEach(async () => {

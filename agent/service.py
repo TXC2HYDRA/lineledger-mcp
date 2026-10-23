@@ -2,12 +2,14 @@
 
 Default model: local Ollama, loopback only, no cloud (D4).
 Opt-in: LINELEDGER_MODEL_PROVIDER=bedrock uses Amazon Nova on Amazon Bedrock through the project-only AWS
-profile (D5). Any other model id, provider or AWS profile is refused at startup.
+profile (D11). Any other model id, provider or AWS profile is refused at startup.
 """
 import json
 import os
 import sys
+import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from guard import (
@@ -27,7 +29,7 @@ scrub_aws_env(PROVIDER)  # must run before strands (and boto3) is imported
 
 import boto3  # noqa: E402
 from strands import Agent  # noqa: E402
-from strands.hooks import BeforeInvocationEvent, BeforeModelCallEvent, HookProvider, HookRegistry  # noqa: E402
+from strands.hooks import AfterToolCallEvent, BeforeInvocationEvent, BeforeModelCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry  # noqa: E402
 from strands.models.bedrock import BedrockModel  # noqa: E402
 from strands.models.ollama import OllamaModel  # noqa: E402
 from strands.tools.mcp import MCPClient  # noqa: E402
@@ -54,8 +56,47 @@ SYSTEM_PROMPT = (
     "Rules for tool arguments: omit optional arguments the user did not state. Never pass shift_date or shift to get_shift_summary; call it with no arguments. "
     "Use the author \"Operator\" for a handover note when the user names no author. "
     "State only what the tool result says; do not add names or details. "
+    "For the state of all lines call get_live_line_status once with no arguments and use roll_up and each line's state; "
+    "for one line pass line_id. A line is running only when its state is RUN; say the plant time (sim_now) and the reason_code of any stopped line. "
+    "Report a sensor by its level field (ok, warn or trip) next to its value; never compare numbers yourself. "
     "Answer in one or two short sentences suitable for speech."
 )
+
+
+# What the agent is doing right now, for the page to show while a slow local model works (GET /progress).
+PROGRESS = {"stage": "", "since": time.monotonic()}
+
+
+def set_stage(stage: str) -> None:
+    PROGRESS["stage"] = stage
+    PROGRESS["since"] = time.monotonic()
+
+
+class Progress(HookProvider):
+    """Records the real steps of a turn: reading the question, each tool call, writing the answer."""
+
+    def __init__(self) -> None:
+        self.model_calls = 0
+
+    def register_hooks(self, registry: HookRegistry, **_kwargs) -> None:
+        registry.add_callback(BeforeInvocationEvent, self._start)
+        registry.add_callback(BeforeModelCallEvent, self._model)
+        registry.add_callback(BeforeToolCallEvent, self._tool)
+        registry.add_callback(AfterToolCallEvent, self._tool_done)
+
+    def _start(self, _event) -> None:
+        self.model_calls = 0
+        set_stage("Reading your question")
+
+    def _model(self, _event) -> None:
+        self.model_calls += 1
+        set_stage("Deciding what to look up" if self.model_calls == 1 else "Writing the answer")
+
+    def _tool(self, event) -> None:
+        set_stage(f"Asking the plant: {str(event.tool_use.get('name', 'tool')).replace('_', ' ')}")
+
+    def _tool_done(self, _event) -> None:
+        set_stage("Reading the result")
 
 
 class ModelCallLimit(HookProvider):
@@ -102,7 +143,7 @@ def build_model(provider: str, model_id: str, ollama_host: str = OLLAMA_HOST, re
 
 
 def assert_model_allowed(model) -> None:
-    """Startup assertion (D4, D5): a bare Agent() would build a Bedrock model with a Claude model id."""
+    """Startup assertion (D4, D11): a bare Agent() would build a Bedrock model with a Claude model id."""
     if isinstance(model, OllamaModel):
         return
     if isinstance(model, BedrockModel):
@@ -127,10 +168,75 @@ def build_agent(
         tools=[mcp],
         system_prompt=SYSTEM_PROMPT,
         callback_handler=None,
-        hooks=[ModelCallLimit(MAX_MODEL_CALLS)],
+        hooks=[Progress(), ModelCallLimit(MAX_MODEL_CALLS)],
     )
     assert_model_allowed(agent.model)
     return agent
+
+
+SESSION_LOST = ("Session terminated", "Session not found")
+# The MCP server closes sessions idle for 30 minutes; rebuild before that so the agent never holds a dead one.
+REBUILD_AFTER_IDLE_S = 20 * 60
+
+
+def session_lost(agent: Agent) -> bool:
+    """True when a tool call in the last turn failed because the MCP session is gone (server restart or expiry)."""
+    for message in agent.messages:
+        for block in message.get("content", []):
+            result = block.get("toolResult") if isinstance(block, dict) else None
+            if result and result.get("status") == "error":
+                text = " ".join(str(c.get("text", "")) for c in result.get("content", []) if isinstance(c, dict))
+                if any(marker in text for marker in SESSION_LOST):
+                    return True
+    return False
+
+
+class AgentRunner:
+    """Owns the agent and its MCP session. One request at a time; a lost session is rebuilt and retried once."""
+
+    def __init__(self, factory=None, provider: str = PROVIDER) -> None:
+        self.factory = factory or build_agent
+        self.provider = provider
+        self.lock = threading.Lock()
+        self.agent: Agent | None = None  # built on the first request, so the agent can start before the MCP server
+        self.last_used = time.monotonic()
+        self.rebuilds = 0
+
+    def rebuild(self) -> None:
+        old = self.agent
+        self.agent = self.factory()
+        self.rebuilds += 1
+        try:
+            if old is not None:
+                old.cleanup()
+        except Exception:  # noqa: BLE001  the old session may already be gone
+            pass
+
+    def answer(self, text: str):
+        with self.lock:
+            if self.agent is None:
+                self.agent = self.factory()
+            elif time.monotonic() - self.last_used > REBUILD_AFTER_IDLE_S:
+                self.rebuild()
+            for attempt in (1, 2):
+                self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
+                result, used, provider = ask_with_fallback(self.agent, text, self.provider, self._fallback)
+                if used is self.agent and attempt == 1 and session_lost(self.agent):
+                    self.rebuild()
+                    continue
+                break
+            self.last_used = time.monotonic()
+            calls = tool_calls(used, 0)
+            if used is not self.agent:
+                try:
+                    used.cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
+            return result, calls, provider
+
+    @staticmethod
+    def _fallback() -> Agent:
+        return build_agent(provider="ollama")
 
 
 def tool_calls(agent: Agent, since: int) -> list[dict]:
@@ -165,8 +271,7 @@ def ask_with_fallback(agent: Agent, text: str, provider: str, build_fallback):
 
 
 class Handler(BaseHTTPRequestHandler):
-    agent: Agent
-    fallback_agent: Agent | None = None
+    runner: AgentRunner
     allowed_origins = {f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in (os.environ.get("WEB_PORT", "5173"),)}
 
     def _send(self, status: int, body: dict) -> None:
@@ -176,6 +281,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def do_GET(self):  # noqa: N802
+        if self.path != "/progress":
+            return self._send(404, {"error": "not found"})
+        busy = bool(PROGRESS["stage"])
+        self._send(200, {"stage": PROGRESS["stage"], "seconds": round(time.monotonic() - PROGRESS["since"], 1) if busy else 0})
 
     def do_POST(self):  # noqa: N802
         origin = self.headers.get("origin")
@@ -191,15 +302,16 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             return self._send(400, {"error": 'expected JSON {"text": "..."}'})
         started = time.monotonic()
-        self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
-        before = 0
+        set_stage("Starting")
         try:
-            result, used, provider = ask_with_fallback(self.agent, text, PROVIDER, self._fallback)
+            result, calls, provider = self.runner.answer(text)
         except Exception as error:  # surface model/connection errors to the UI, never fake success
+            set_stage("")
             return self._send(502, {"error": f"{type(error).__name__}: {error}"})
+        set_stage("")
         body = {
             "reply": str(result).strip(),
-            "tool_calls": tool_calls(used, before),
+            "tool_calls": calls,
             "seconds": round(time.monotonic() - started, 1),
             "provider": provider,
             "model": MODEL_ID if provider == PROVIDER else OLLAMA_MODEL,
@@ -221,8 +333,20 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def warm_up_ollama() -> None:
+    """Loads the model into memory now and keeps it there, so the first question does not wait for the load."""
+    try:
+        body = json.dumps({"model": OLLAMA_MODEL, "keep_alive": "60m"}).encode()
+        urllib.request.urlopen(urllib.request.Request(f"{OLLAMA_HOST}/api/generate", body, {"content-type": "application/json"}), timeout=300).read()
+    except Exception as error:  # noqa: BLE001  Ollama may not be running yet; the first request then reports it
+        print(f"model warm-up skipped: {type(error).__name__}", file=sys.stderr, flush=True)
+
+
 if __name__ == "__main__":
-    Handler.agent = build_agent()
+    assert_model_allowed(build_model(PROVIDER, MODEL_ID))  # refuse a wrong model or profile at startup, without needing the MCP server
+    Handler.runner = AgentRunner()
+    if PROVIDER == "ollama" or FALLBACK:
+        threading.Thread(target=warm_up_ollama, daemon=True).start()
     where = "local Ollama" if PROVIDER == "ollama" else f"Amazon Bedrock, {REGION}, profile {PROJECT_PROFILE}"
     print(f"LineLedger agent ({MODEL_ID}, {where}) on http://127.0.0.1:{PORT}/chat")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

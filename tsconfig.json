@@ -19,6 +19,8 @@
     "lambda/**/*.ts",
     "scripts/**/*.ts",
     "server/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "e2e/**/*.ts",
+    "playwright.config.ts"
   ]
 }

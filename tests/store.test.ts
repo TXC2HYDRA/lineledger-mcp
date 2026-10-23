@@ -30,6 +30,13 @@ describe.each(HARNESSES)('$name store', (h) => {
     expect((await store.listFollowUps({ status: 'closed' })).map((f) => f.closed_at)).toEqual(['2026-10-22T10:00:00.000Z'])
   })
 
+  it('keeps the simulation state: none at first, then the latest text', async () => {
+    expect(await store.getSimState()).toBeUndefined()
+    await store.putSimState('{"n":1}')
+    await store.putSimState('{"n":2,"big":"' + 'x'.repeat(100_000) + '"}')
+    expect(JSON.parse((await store.getSimState())!).n).toBe(2)
+  })
+
   it('sorts follow-ups by due date with no due date last, then id', async () => {
     const created_at = '2026-10-22T09:00:00.000Z'
     await store.addFollowUp({ title: 'no date', owner: 'o', line_id: null, due_date: null, created_at })

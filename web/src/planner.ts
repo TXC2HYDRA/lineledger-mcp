@@ -1,5 +1,5 @@
 // Deterministic, rule-based planner: maps one operator request to one MCP tool call.
-// No LLM involved. Phase 4 may add a model-backed planner behind the same shape.
+// No LLM involved. The optional agent service (agent/) is the model-backed alternative.
 export type Plan =
   | { kind: 'call'; tool: string; args: Record<string, unknown> }
   | { kind: 'help'; message: string }
@@ -16,9 +16,20 @@ const STOPWORDS = new Set(
 )
 
 const HELP =
-  'Try: "shift summary", "add handover note: sealer jaw ran hot", "open follow-ups", ' +
-  '"add follow-up: re-check guard, owner Ravi, line 2", "close follow-up 3", "stock of hdpe", ' +
+  'Try: "how are the lines doing right now", "why is line 2 down", "is the sealer temperature normal", "shift summary", ' +
+  '"show the trend for the last 10 shifts", "plant events", "receive 20000 kg hdpe", "add handover note for line 2: sealer jaw ran hot", ' +
+  '"open follow-ups", "add follow-up: re-check guard, owner Ravi, line 2", "close follow-up 3", "stock of hdpe", ' +
   'or "how many 600x400x300 12kg boxes fit in a 20ft container".'
+
+const SKUS: [RegExp, string][] = [
+  [/\b(hdpe|granules?|poly)\b/, 'PLY-HDPE'],
+  [/\b(steel|strip)\b/, 'STL-040'],
+  [/\b(heater|bands?)\b/, 'HTR-BAND'],
+  [/\b(labels?)\b/, 'LBL-ROLL'],
+  [/\b(film|shrink)\b/, 'FLM-SHR'],
+]
+const skuOf = (text: string): string | undefined =>
+  /\b([a-z]{3}-[a-z0-9]{3,8})\b/i.exec(text)?.[1]?.toUpperCase() ?? SKUS.find(([re]) => re.test(text.toLowerCase()))?.[1]
 
 const lineOf = (t: string): string | undefined => {
   const m = /\bline\s*#?\s*(\d+)/i.exec(t)
@@ -70,6 +81,15 @@ export function plan(input: string): Plan {
     return { kind: 'call', tool: 'list_handover_notes', args: { limit: 10, ...(line_id && { line_id }) } }
   }
 
+  // Simulation: goods receipt
+  if (/\b(receive|received|receipt|delivered|delivery|book in|goods in)\b/.test(t)) {
+    const sku = skuOf(text)
+    const qty = Number(/\b(\d[\d,]*)\b/.exec(t.replace(/\b[a-z]{3}-[a-z0-9]+\b/g, ''))?.[1]?.replace(/,/g, ''))
+    if (!sku) return { kind: 'help', message: 'Which item arrived? Say: receive 2500 kg hdpe, or receive 6 heater bands.' }
+    if (!qty) return { kind: 'help', message: 'How much arrived? Say: receive 2500 kg hdpe.' }
+    return { kind: 'call', tool: 'receive_stock', args: { sku, quantity: qty } }
+  }
+
   // Container load
   const dims = /(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|cm)?/.exec(t)
   if (dims && /\b(container|fit|fits|load|pack|boxes?|cartons?|crates?)\b/.test(t)) {
@@ -95,6 +115,24 @@ export function plan(input: string): Plan {
     const query = words.sort((a, b) => b.length - a.length)[0]
     if (!query) return { kind: 'help', message: 'Which item? Say: stock of hdpe.' }
     return { kind: 'call', tool: 'check_stock', args: { query } }
+  }
+
+  // Plant event log
+  if (/\b(events?|what happened|andon|log)\b/.test(t)) {
+    return { kind: 'call', tool: 'get_factory_events', args: { limit: 10, ...(line_id && { line_id }) } }
+  }
+
+  // Trend over recent shifts
+  if (/\b(trend|history)\b/.test(t)) {
+    const n = Number(/\blast\s+(\d+)\s+shifts?\b/.exec(t)?.[1])
+    return { kind: 'call', tool: 'get_shift_history', args: { limit: Math.min(60, Math.max(2, n || 14)) } }
+  }
+
+  // Live plant: placed before the shift rule, which would otherwise catch "line 2" through "lines?"
+  if (/\b(why|down|stopped|running|right now|live|temperature|temp|alarms?|status|sealer)\b/.test(t)) {
+    // The heat sealer and its jaw-temperature sensor exist only on Line 2 (plant/plant.json).
+    const line = line_id ?? (/\b(sealer|jaw|temperature|temp)\b/.test(t) ? 'L2' : undefined)
+    return { kind: 'call', tool: 'get_live_line_status', args: line ? { line_id: line } : {} }
   }
 
   // Shift summary

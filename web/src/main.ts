@@ -97,16 +97,17 @@ function renderBars(lines: Data[]) {
             { class: 'bar-col', 'data-worst': String(l === worst) },
             h('span', { class: 'bar-val' }, label(l)),
             h('div', { class: 'bar-track', role: 'img', 'aria-label': `${l.name}: ${label(l)}` }, h('span', { style: `height:${Math.max(2, Math.min(100, (value(l) / max) * 100))}%` })),
-            h('span', { class: 'muted' }, l.name),
+            h('span', { class: 'muted' }, lines.length > 3 ? l.line_id : l.name),
           ),
         ),
       ),
     )
   const by = (f: (l: Data) => number, pick: (a: number, b: number) => number) => lines.reduce((a, l) => (pick(f(l), f(a)) === f(l) ? l : a))
   const maxDown = Math.max(1, ...lines.map((l) => l.downtime_min))
+  const pctOf = (l: Data) => (l.in_progress ? l.percent_of_pace : l.percent_of_target) as number
   $('bars').dataset.state = 'populated'
   $('bars').replaceChildren(
-    group('Output, % of target', (l) => l.percent_of_target, 100, (l) => `${l.percent_of_target}%`, by((l) => l.percent_of_target, Math.min)),
+    group(lines[0]?.in_progress ? 'Output, % of target to date' : 'Output, % of target', pctOf, 100, (l) => `${pctOf(l)}%`, by(pctOf, Math.min)),
     group('Downtime, minutes', (l) => l.downtime_min, maxDown, (l) => `${l.downtime_min} min`, by((l) => l.downtime_min, Math.max)),
   )
 }
@@ -121,13 +122,13 @@ function svgEl(tag: string, attrs: Record<string, string>): SVGElement {
 async function refreshTrend() {
   const box = $('trend')
   try {
-    const { shifts } = await data('get_shift_history', { limit: 14 })
+    const shifts = ((await data('get_shift_history', { limit: 15 })).shifts as Data[]).filter((s) => !s.in_progress && s.shift !== 'C').slice(-14) // finished A and B shifts (shift C runs two lines only)
     if (shifts.length < 2) {
       box.dataset.state = 'empty'
       return box.replaceChildren(muted('Not enough shift history yet.'))
     }
-    const ids = (shifts[0].lines as Data[]).map((l) => l.line_id as string)
-    const series = ids.map((id) => ({ id, name: (shifts[0].lines as Data[]).find((l) => l.line_id === id)!.name as string, values: (shifts as Data[]).map((s) => (s.lines as Data[]).find((l) => l.line_id === id)?.percent_of_target as number) }))
+    const ids = (shifts[0]!.lines as Data[]).map((l) => l.line_id as string)
+    const series = ids.map((id) => ({ id, name: (shifts[0]!.lines as Data[]).find((l) => l.line_id === id)!.name as string, values: (shifts as Data[]).map((s) => (s.lines as Data[]).find((l) => l.line_id === id)?.percent_of_target as number) }))
     const all = series.flatMap((s) => s.values)
     const lo = Math.min(70, Math.floor(Math.min(...all) / 5) * 5)
     const hi = Math.max(110, Math.ceil(Math.max(...all) / 5) * 5)
@@ -141,7 +142,7 @@ async function refreshTrend() {
     box.replaceChildren(
       h('div', { class: 'legend' }, ...series.map((s, n) => h('span', { class: `key k${n}` }, `${s.name} · ${s.values.at(-1)}%`)), h('span', { class: 'key kt' }, 'Target 100%')),
       h('div', { class: 'plot' }, h('div', { class: 'y-axis' }, h('span', {}, `${hi}%`), h('span', {}, `${lo}%`)), svg),
-      h('div', { class: 'x-axis' }, h('span', {}, label(shifts[0])), h('span', {}, label(shifts.at(-1)))),
+      h('div', { class: 'x-axis' }, h('span', {}, label(shifts[0]!)), h('span', {}, label(shifts.at(-1)!))),
     )
   } catch (e) {
     box.dataset.state = 'error'
@@ -158,34 +159,43 @@ async function refreshShift() {
   try {
     const d = await data('get_shift_summary')
     const lines = d.lines as Data[]
-    const status = statusOf(d.totals.percent_of_target)
+    const inProgress = Boolean(d.in_progress)
+    const percent = inProgress ? d.totals.percent_of_pace : d.totals.percent_of_target
     const downtime = lines.reduce((sum, l) => sum + l.downtime_min, 0)
-    $('hero-sub').textContent = `Shift ${d.shift} · ${d.shift_date} · output / target`
-    $('hero-metric').textContent = `${d.totals.percent_of_target}%`
-    setStatus($('hero-status'), status)
-    $('hero-meta').textContent = `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min`
+    $('hero-sub').textContent = inProgress ? `Shift ${d.shift} · ${d.shift_date} · in progress · output / target to date` : `Shift ${d.shift} · ${d.shift_date} · output / target`
+    $('hero-metric').textContent = `${percent}%`
+    setStatus($('hero-status'), statusOf(percent))
+    const weighted = lines.length > 2 ? ' · target-weighted across products' : ''
+    $('hero-meta').textContent = inProgress
+      ? `${d.totals.produced_units} / ${d.totals.target_to_date} units to date (shift target ${d.totals.target_units}) · downtime ${downtime} min${weighted}`
+      : `${d.totals.produced_units} / ${d.totals.target_units} units · downtime ${downtime} min${weighted}`
     renderBars(lines)
     document.querySelectorAll<HTMLSelectElement>('select[name="line_id"]').forEach((sel) => {
       if (sel.options.length > 1) return
       for (const l of lines) sel.append(h('option', { value: l.line_id }, l.name))
     })
+    const compact = lines.length > 3
+    $('shift').dataset.compact = String(compact)
     panel(
       'shift',
       'populated',
       ...lines.map((l) => {
+        const value = l.in_progress ? l.percent_of_pace : l.percent_of_target
         const st = h('span', { class: 'status' })
         setStatus(st, l.status)
         return h(
           'article',
-          { class: 'card stat', 'data-status': l.status },
-          h('div', { class: 'stat-head' }, h('span', { class: 'tag' }, l.line_id), h('strong', {}, l.name), st),
+          { class: compact ? 'card stat compact' : 'card stat', 'data-status': l.status, 'data-line': l.line_id },
+          h('div', { class: 'stat-head' }, h('span', { class: 'tag' }, l.line_id), h('strong', {}, compact ? '' : l.name), st),
           h('p', { class: 'muted' }, l.product),
-          h('p', { class: 'stat-value' }, `${l.percent_of_target}%`),
-          h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${l.produced_units} of ${l.target_units}, ${l.percent_of_target} percent` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, l.percent_of_target)}%` })),
-          h('p', { class: 'muted' }, `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+          h('p', { class: 'stat-value' }, `${value}%`),
+          h('div', { class: 'bar', role: 'img', 'aria-label': `${l.name}: ${value} percent of target${l.in_progress ? ' to date' : ''}` }, h('span', { 'data-status': l.status, style: `width:${Math.min(100, value)}%` })),
+          h('p', { class: 'muted' }, l.in_progress ? `${l.produced_units} / ${l.target_to_date} to date · down ${l.downtime_min} min` : `${l.produced_units} / ${l.target_units} units · downtime ${l.downtime_min} min`),
+          h('div', { class: 'live', id: `live-${l.line_id}` }, h('div', { class: 'live-body' }), h('div', { class: 'live-actions', role: 'group', 'aria-label': `${l.name} actions` })),
         )
       }),
     )
+    renderLive()
   } catch (e) {
     $('hero-sub').textContent = 'Shift output unavailable.'
     $('bars').dataset.state = 'error'
@@ -257,6 +267,126 @@ function showContainer(d: Data) {
 
 const refreshAll = () => Promise.all([refreshShift(), refreshTrend(), refreshNotes(), refreshFollowUps()])
 
+// ---- live plant (Tarnby Works simulation), pushed over the MCP session ------------------------------
+// The server sends notifications/resources/updated for plant://snapshot; the page then reads the resource
+// again. Everything goes through MCP, so it also shows in the trace. Nothing on the page controls a line.
+let live: Data | undefined
+let shiftKey = ''
+let lastShiftRefresh = 0
+const LIVE_LABEL: Record<string, string> = { RUN: '▶ RUN', STOP_FAULT: '■ STOPPED', STOP_OTHER: '■ STOPPED', PLANNED_STOP: '⏸ PLANNED STOP', IDLE_STARVED: '◐ WAITING', OFF_SHIFT: '○ OFF SHIFT' }
+const RESTOCK: Record<string, string> = { 'STL-040': 'receive 10000 kg steel strip', 'PLY-HDPE': 'receive 20000 kg hdpe', 'LBL-ROLL': 'receive 60 label rolls', 'FLM-SHR': 'receive 60 shrink film rolls' }
+const SIM_TOOLS = new Set(['receive_stock'])
+const signalName = (tag: string) => {
+  const name = String(tag.split('.').pop()).replace(/_temp_c$/, ' temperature').replace(/_/g, ' ')
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+// The only action offered on a card is a goods receipt for a line waiting for material (an ERP record).
+function liveActions(l: Data): [string, string][] {
+  if (l.state !== 'IDLE_STARVED') return []
+  const sku = String(l.reason_code).replace(/^NO_/, '')
+  return [[`Book receipt: ${sku}`, RESTOCK[sku] ?? `receive 100 ${sku}`]]
+}
+
+function renderLive() {
+  if (!live) return
+  const clock = live.sim_clock as Data
+  const chip = $('sim-chip')
+  chip.hidden = false
+  chip.dataset.mode = clock.mode
+  const time = String(clock.sim_now).slice(11)
+  chip.textContent = clock.mode === 'hold' ? `SIM ${time} · HOLD` : clock.mode === 'time-lapse' ? `SIM ${time} · ×${clock.speed} TIME-LAPSE` : `SIM ${time} · ×${clock.speed}`
+  $('live-clock').textContent = `${live.company} (fictional) · plant time ${clock.sim_now} · shift ${live.shift.shift}, lead ${live.shift.lead}, ${live.shift.headcount} on shift`
+  for (const l of live.lines as Data[]) {
+    const el = document.getElementById(`live-${l.line_id}`)
+    if (!el) continue
+    el.dataset.on = 'true'
+    const reason = l.state === 'IDLE_STARVED' ? `waiting for ${String(l.reason_code).replace(/^NO_/, '')}` : String(l.reason_code ?? '')
+    const detail = l.state === 'RUN' ? `${l.rate_per_h}/h` : l.state === 'OFF_SHIFT' ? '' : `${reason} · ${l.minutes_in_state} min`
+    el.querySelector('.live-body')!.replaceChildren(
+      h('p', { class: 'live-head' }, h('span', { class: 'live-state', 'data-state': l.state }, LIVE_LABEL[l.state] ?? l.state), h('span', { class: 'live-detail' }, detail)),
+      ...(l.signals as Data[]).map((g) => {
+        const level = g.value >= g.trip_limit ? 'trip' : g.value >= g.warn_limit ? 'warn' : 'ok'
+        return h('p', { class: 'signal', 'data-level': level, title: `warn ${g.warn_limit}, trip ${g.trip_limit}` }, `${signalName(g.tag)} ${g.value} ${g.unit} · ${level === 'ok' ? 'normal' : level.toUpperCase()}`)
+      }),
+      ...((l.open_alarms as Data[]).length ? [h('p', { class: 'live-alarm' }, `⚠ ${(l.open_alarms as Data[]).map((a) => a.code).join(', ')}`)] : []),
+    )
+    // Buttons are rebuilt only when the choice changes, so keyboard focus is not lost on every update.
+    const actions = el.querySelector<HTMLElement>('.live-actions')!
+    const choice = liveActions(l)
+    const key = JSON.stringify(choice)
+    if (actions.dataset.key === key) continue
+    actions.dataset.key = key
+    actions.replaceChildren(
+      ...choice.map(([label, say]) => {
+        const b = h('button', { type: 'button', title: `Says: ${say}` }, label)
+        b.addEventListener('click', () => void send(say, false, false))
+        return b
+      }),
+    )
+  }
+  // A new shift: reload the summary, trend and lists. Otherwise refresh the shift numbers now and then.
+  const key = `${live.shift.date} ${live.shift.shift}`
+  if (shiftKey && key !== shiftKey) void refreshAll()
+  else if (Date.now() - lastShiftRefresh > 10_000) {
+    lastShiftRefresh = Date.now()
+    void refreshShift()
+  }
+  shiftKey = key
+}
+
+function renderEvents(s: Data) {
+  const alarms = (s.alarms_open as Data[]).map((a) =>
+    h('li', { 'data-kind': 'alarm-open' }, h('span', { class: 'muted' }, String(a.raised_at).slice(11)), ` ⚠ ${a.line_id ?? 'Plant'} ${String(a.severity).toUpperCase()} ${a.code}`),
+  )
+  const events = (s.events as Data[]).slice(0, 6).map((e) => h('li', { 'data-kind': e.kind }, h('span', { class: 'muted' }, String(e.sim_time).slice(11)), ' ', e.message))
+  if (!alarms.length && !events.length) return panel('events', 'empty', muted('No events yet.'))
+  panel('events', 'populated', ...alarms, ...events)
+}
+
+// One read at a time; an update that arrives during a read triggers one more read.
+function reader(fn: () => Promise<void>) {
+  let running = false
+  let again = false
+  const run = async (): Promise<void> => {
+    if (running) {
+      again = true
+      return
+    }
+    running = true
+    try {
+      await fn()
+    } catch {
+      // a missed update is fine: the next notification reads again
+    } finally {
+      running = false
+      if (again) {
+        again = false
+        void run()
+      }
+    }
+  }
+  return run
+}
+const refreshLive = reader(async () => {
+  live = await mcp.readJson('plant://snapshot')
+  renderLive()
+  renderEvents(live)
+})
+
+async function startLive(enabled: boolean) {
+  if (!enabled) {
+    $('live-clock').textContent = 'Seed data, no simulation. Start the server with npm run dev:plant for the live plant.'
+    return panel('events', 'empty', muted('No live plant on this server.'))
+  }
+  try {
+    await mcp.watch('plant://snapshot', () => void refreshLive())
+  } catch {
+    setInterval(() => void refreshLive(), 2000) // stateless server: no push, so poll
+  }
+  await refreshLive()
+}
+
 // ---- planner mode: deterministic rules (default) or the agent service (local Ollama or Amazon Bedrock) ----
 let modelMode = false
 type AgentReply = { reply: string; tool_calls: { name: string }[]; seconds: number; model: string; provider?: string; fallback?: boolean; usage?: { totalTokens: number } | null }
@@ -277,17 +407,23 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
   if (modelMode) {
     setVoice('thinking', 'The agent model is working. A local model can take a while on CPU.')
     let answer: AgentReply | undefined
+    // The agent service reports what it is doing (reading, asking the plant, writing); show that with the time so far.
+    const t0 = Date.now()
+    const poll = setInterval(async () => {
+      const p = (await fetch('/agent/progress').then((r) => r.json()).catch(() => undefined)) as { stage?: string } | undefined
+      const secs = Math.round((Date.now() - t0) / 1000)
+      setVoice('thinking', `${p?.stage || 'Sending to the agent model'} · ${secs} s`)
+    }, 700)
     try {
       answer = await askAgent(text)
     } catch (e) {
       // Last resort: the rule-based planner answers the same request, so the chat never ends in an error.
       addMessage('LineLedger', `Agent model unavailable: ${errorText(e)}. Answering with the rule-based planner instead.`, 'error')
+    } finally {
+      clearInterval(poll)
     }
     if (answer) {
-      const tools = answer.tool_calls.map((c) => c.name).join(', ') || 'none'
-      const where = answer.provider === 'bedrock' ? 'Amazon Bedrock' : answer.fallback ? 'local model (fallback from Bedrock)' : 'local model'
-      const tokens = answer.usage ? ` · ${answer.usage.totalTokens} tokens` : ''
-      addMessage('LineLedger', `${answer.reply}\n[${where} ${answer.model} · ${answer.seconds} s${tokens} · tools: ${tools}]`)
+      addMessage('LineLedger', answer.reply) // the model, tokens and tools are in the agent's log and the MCP trace
       void refreshAll()
       finish(answer.reply, fromVoice)
       busy = false
@@ -318,6 +454,7 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
     if (p.tool === 'plan_container_load') showContainer(d)
     if (p.tool === 'create_handover_note') void refreshNotes()
     if (p.tool === 'create_follow_up' || p.tool === 'close_follow_up') void refreshFollowUps()
+    if (SIM_TOOLS.has(p.tool)) void refreshLive()
     finish(reply, fromVoice)
   } catch (e) {
     const message = `Request failed: ${errorText(e)}`
@@ -343,7 +480,8 @@ function traceLabel(e: Data): string {
   const m = e.message ?? {}
   const kind = m.method ?? (m.error ? 'error' : 'result')
   const tool = m.method === 'tools/call' ? ` ${m.params?.name}` : ''
-  return `${e.dir === 'in' ? '→ request' : '← response'} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
+  const what = e.dir === 'in' ? (m.id === undefined && m.method ? '→ notification' : '→ request') : m.id === undefined && m.method ? '← push' : '← response'
+  return `${what} ${kind}${tool}${m.id !== undefined ? ` (id ${m.id})` : ''}`
 }
 const PULSE_CELLS = 42
 const pulse: ('in' | 'out' | 'err')[] = []
@@ -608,8 +746,6 @@ themeBtn.addEventListener('click', () => {
 })
 
 // ---- start ----------------------------------------------------------------------------------
-let storeNote = ''
-const connectedText = () => `MCP connected · protocol ${mcp.protocolVersion}${storeNote}${mcp.sessionId ? ' · live session' : ''}`
 startTrace()
 void (async () => {
   try {
@@ -618,19 +754,49 @@ void (async () => {
       if (resource === 'follow_ups') void refreshFollowUps()
       if (resource === 'handover_notes') void refreshNotes()
     }
-    mcp.onReconnect = () => setConn('connected', connectedText())
     await mcp.connect()
     // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
-    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; degraded?: boolean }
+    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; degraded?: boolean; simulation?: boolean }
     const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ` · store: SQLite${health.degraded ? ' (fallback)' : ''}` : ''
-    storeNote = store
-    setConn('connected', connectedText())
-    addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
+    const connText = () => `MCP connected · protocol ${mcp.protocolVersion} · ${mcp.sessionId ? `session ${mcp.sessionId.slice(0, 8)}` : 'stateless'}${store}`
+    const showSession = () => {
+      setConn('connected', connText())
+      $('conn').dataset.session = mcp.sessionId ?? ''
+    }
+    showSession()
+    mcp.onReconnect = () => {
+      showSession()
+      void refreshAll()
+      void refreshLive()
+    }
+    addEventListener('pagehide', () => mcp.close())
+    addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask how the lines are doing right now, why a line is down, for the shift summary, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()
+    await startLive(health.simulation !== false)
+    // A server restart ends the session and stops the pushes. Nothing heard for 5 s while the plant pushes (30 s
+    // otherwise): ping, which opens a new session on a 404 (see mcp.ts), and say so on the page meanwhile
+    // instead of showing stale data as live.
+    let lost = false
+    setInterval(async () => {
+      if (Date.now() - mcp.lastHeard < (mcp.watching ? 5_000 : 30_000)) return
+      try {
+        await mcp.ping()
+        if (lost) {
+          lost = false
+          showSession()
+          void refreshLive()
+        }
+      } catch {
+        if (!lost) {
+          lost = true
+          setConn('connecting', 'MCP connection lost, reconnecting…')
+        }
+      }
+    }, 2000)
   } catch (e) {
     setConn('error', 'MCP not reachable')
     setVoice('error', `Cannot reach the MCP server: ${errorText(e)}`)
-    for (const id of ['shift', 'notes', 'followups', 'trend']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
+    for (const id of ['shift', 'notes', 'followups', 'trend', 'events']) panel(id, 'error', 'Server unreachable. Start it with: npm run dev:server')
   }
 })()

@@ -253,6 +253,92 @@ class LimitTests(unittest.TestCase):
         agent("again")
         self.assertEqual(calls["n"], 8)  # the count resets for each request
 
+    def test_session_lost_detects_a_dead_mcp_session(self):
+        lost = {"role": "user", "content": [{"toolResult": {"toolUseId": "t1", "status": "error", "content": [{"text": "MCPClientError: Session terminated"}]}}]}
+        fine = {"role": "user", "content": [{"toolResult": {"toolUseId": "t1", "status": "error", "content": [{"text": "Unknown line"}]}}]}
+        self.assertTrue(service.session_lost(SimpleNamespace(messages=[lost])))
+        self.assertFalse(service.session_lost(SimpleNamespace(messages=[fine, {"role": "assistant", "content": [{"text": "ok"}]}])))
+
+    def test_runner_starts_without_the_mcp_server(self):
+        """The agent service can start first; the MCP session is opened on the first request."""
+        calls = []
+
+        def factory():
+            calls.append(1)
+            raise RuntimeError("mcp not up")
+
+        runner = service.AgentRunner(factory)
+        self.assertEqual(calls, [])
+        with self.assertRaises(RuntimeError):
+            runner.answer("hello")
+        self.assertEqual(calls, [1])
+
+    def test_runner_rebuilds_the_agent_when_the_mcp_server_restarts(self):
+        """A stateful MCP session dies with its server; the runner reconnects and retries once."""
+        from strands import Agent
+        from strands.models.model import Model
+        from strands.tools.mcp import MCPClient
+
+        port = 8792
+
+        def serve():
+            env = {**os.environ, "PORT": str(port), "LINELEDGER_DB": ":memory:", "LINELEDGER_STORE": "sqlite", "LINELEDGER_SIM": "off"}
+            proc = subprocess.Popen([str(ROOT / "node_modules/.bin/tsx"), "server/main.ts"], cwd=ROOT, env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(60):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1)
+                    return proc
+                except OSError:
+                    time.sleep(0.25)
+            proc.kill()
+            raise RuntimeError("MCP server did not start")
+
+        class ToolThenAnswer(Model):
+            """Calls check_stock once, then repeats the tool result as its answer."""
+
+            def update_config(self, **_kwargs):
+                pass
+
+            def get_config(self):
+                return {"model_id": "fake"}
+
+            async def structured_output(self, *_args, **_kwargs):
+                raise NotImplementedError
+
+            async def stream(self, messages, *_args, **_kwargs):
+                results = [b["toolResult"] for b in messages[-1].get("content", []) if "toolResult" in b]
+                yield {"messageStart": {"role": "assistant"}}
+                if results:
+                    text = " ".join(c.get("text", "") for c in results[0]["content"])
+                    yield {"contentBlockDelta": {"delta": {"text": f"{results[0]['status']}: {text}"}}}
+                    yield {"contentBlockStop": {}}
+                    yield {"messageStop": {"stopReason": "end_turn"}}
+                else:
+                    yield {"contentBlockStart": {"start": {"toolUse": {"toolUseId": "t1", "name": "check_stock"}}}}
+                    yield {"contentBlockDelta": {"delta": {"toolUse": {"input": '{"query": "steel"}'}}}}
+                    yield {"contentBlockStop": {}}
+                    yield {"messageStop": {"stopReason": "tool_use"}}
+
+        def factory():
+            return Agent(model=ToolThenAnswer(), tools=[MCPClient(url=f"http://127.0.0.1:{port}/mcp")], callback_handler=None)
+
+        proc = serve()
+        try:
+            runner = service.AgentRunner(factory)
+            first, calls, _ = runner.answer("stock of steel")
+            self.assertIn("STL-040", str(first))
+            self.assertEqual([c["name"] for c in calls], ["check_stock"])
+            proc.terminate()
+            proc.wait(timeout=10)
+            proc = serve()  # same port, new process: the old session id is unknown now
+            second, _, _ = runner.answer("stock of steel")
+            self.assertIn("STL-040", str(second))
+            self.assertEqual(runner.rebuilds, 1)
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+
     def test_turn_usage_reads_the_latest_invocation(self):
         usage = {"inputTokens": 3000, "outputTokens": 120, "totalTokens": 3120, "cacheReadInputTokens": 0}
         result = SimpleNamespace(metrics=SimpleNamespace(latest_agent_invocation=SimpleNamespace(usage=usage)))

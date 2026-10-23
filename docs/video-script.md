@@ -35,10 +35,10 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 | Time | On screen | Narration | Exact input |
 |---|---|---|---|
 | 0:00 - 0:14 | Full page, nothing typed yet. Cursor still. | "Shift handover on a factory floor often lives on paper or in someone's head. LineLedger is a voice-first co-pilot for a plant manager, built for the Alexa+ track. This is a simulated voice experience in a web app, with synthetic data." | none |
-| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server with nine tools. The sidebar shows the negotiated protocol version. The trace drawer shows the real messages." | none |
+| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server, and a simulated plant: a fictional factory with seven lines. The sidebar shows the protocol version and this browser's MCP session. The trace drawer shows the real messages." | none |
 | 0:30 - 0:48 | Click the "Shift summary" button. A new `tools/call` for `get_shift_summary` appears at the end of the trace (the dashboard already called it once on page load, so older entries are above it). The dashboard shows both lines with status. | "Shift summary. The assistant calls one tool and reads back output against target. Line 2 is flagged behind." [On the seed data Line 1 shows "at risk", so do not say both are behind.] | click button "Shift summary" (sends `shift summary`) |
 | 0:48 - 1:08 | Type in the box and press Send. Trace shows `create_handover_note`, then a `list_handover_notes` call from the dashboard refresh. The new note appears in the dashboard Handover notes list. | "Now a handover note, saved through a tool call." | `add handover note for line 2: sealer jaw ran hot again at 14:00, heater band swapped` |
-| 1:08 - 1:25 | Type and Send. Trace shows `create_follow_up`, then a `list_follow_ups` call from the dashboard refresh. Dashboard Open follow-ups now has three entries. | "And a follow-up with an owner and a due date." | `add follow-up: re-check the guard, owner Asha, due 2026-10-24, line 2` |
+| 1:08 - 1:25 | Type and Send. Trace shows `create_follow_up`, then a `list_follow_ups` call from the dashboard refresh. Dashboard Open follow-ups now has one entry (the plant profile starts with none). | "And a follow-up with an owner and a due date." | `add follow-up: re-check the guard, owner Asha, due 2026-10-24, line 2` |
 | 1:25 - 1:40 | Type and Send. Reply shows the heater band as out of stock with a suggested order quantity. | "Stock check. Out of stock, with a suggested order quantity and lead time." | `stock of heater band` |
 | 1:40 - 2:00 | Click the "Container load" button. Trace shows `plan_container_load`. The Container load panel fills in. | "Container loading. This tool calls a separate open source package I published, which gives the count and says whether geometry or payload is the limit." | click button "Container load" (sends `how many 600x400x300 12kg boxes fit in a 20ft container`) |
 | 2:00 - 2:25 | Cut to the terminal. Press Ctrl+C in the server terminal, then run `npm run dev:server` again. Cut back to the browser, reload the page, wait for the connected line. The trace now shows only the new session (`initialize`, `tools/list` and the dashboard's calls). Then type the two requests. The new note and the new follow-up are listed. | "Persistence. I stop the server and start it again. The data is in SQLite, so the note and the follow-up are still there. The trace history is gone, because it only lives in server memory, but the data is not." | in terminal: Ctrl+C, then `npm run dev:server`. In the browser, reload, then type `list handover notes` and `open follow-ups` |
@@ -52,7 +52,7 @@ Narration word count is about 205 words (counted from the table), which fits 2:4
 - Handover note: the planner takes the note text after the colon, and takes the line from "line 2" anywhere in the sentence. Do not write another line number or the word "follow-up" inside the note text, or the planner will route it differently.
 - Follow-up: the planner needs a title after the colon and `owner <name>`. It also strips the words `line N` from the title, so keep "line 2" out of the title text (it is taken as the line instead). `due YYYY-MM-DD` and `line N` are optional. Pick a due date that is not in the past relative to the recording day if the date is shown.
 - Container load: do not read the result numbers aloud. Say what the panel shows.
-- Restart beat: the notes and follow-ups come back because they are in `data/lineledger.sqlite`. The trace panel only holds entries in server memory, so after the restart it has only the new session's entries. Reload the page after restarting so the page reconnects cleanly; whether a reload is strictly needed has not been tried for the default stateless server. In the opt-in stateful mode (`LINELEDGER_STATEFUL=1`) no reload is needed: the page starts a new session by itself, which an automated headless-Chrome run confirmed, but nobody has rehearsed it by hand. If you started with `WEB_PORT`, restart the server with the same `WEB_PORT`. [REHEARSE THIS ONCE: a test proves handover notes survive a restart of the SQLite file, but follow-ups use the same database and have no restart test, and the exact reload sequence in a real browser has not been run or timed.]
+- Restart beat (plant profile): the notes, follow-ups, stock and the whole plant state are in `data/plant.sqlite`, so after a restart the clock and the lines carry on from where they stopped (the plant clock does not run while the server is down); the open page notices the restart within about 7 seconds and takes a new session by itself (it shows "reconnecting" while the server is still down). In the seed profile the notes and follow-ups come back because they are in `data/lineledger.sqlite`. The trace panel only holds entries in server memory, so after the restart it has only the new session's entries. Reload the page after restarting so the page reconnects cleanly; whether a reload is strictly needed has not been tried. If you started with `WEB_PORT`, restart the server with the same `WEB_PORT`. [REHEARSE THIS ONCE: a test proves handover notes survive a restart of the SQLite file, but follow-ups use the same database and have no restart test, and the exact reload sequence in a real browser has not been run or timed.]
 - The first `tools/list` and `initialize` messages also appear in the trace. You can point at them in the tour beat if there is time.
 
 ## Optional beats (only if their condition holds)
@@ -75,7 +75,7 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 
   This is a simulated voice experience in a web app. All data is synthetic demo data. It is not connected to a real factory, a physical device or real customers.
 
-  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with nine tools, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
+  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with twelve tools and a simulated seven-line plant pushed over a stateful MCP session, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
 
   Repository (MIT): https://github.com/TXC2HYDRA/lineledger-mcp
   Container-load package (MIT): https://github.com/TXC2HYDRA/container-load-planner
@@ -93,3 +93,27 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 - Real-keyboard pass of the UI.
 - Local model reliability: only one 10-prompt spike, with 3 of 10 prompts wrong or failed. See `docs/spike-results.md`.
 - The container-load-planner CI status and its test count. [VERIFY before saying anything about them.]
+
+## Plant story shot list (2026-10-23, replaces the beats above if you record the plant)
+
+Setup: `npm run plant:reset`, then `LINELEDGER_SIM_HOLDS=on npm run dev:plant` and `npm run dev:web`, and
+start recording when the page connects (plant time 12:55). The clock pauses 12 s at 12:58, 13:15 and 13:23
+(the chip shows HOLD) so you can speak. Say "simulated" once, early. No music, no third-party logos, the
+synthetic badge and the clock chip on screen all the time. Do not restart the server on camera.
+
+| Video | Plant time | On screen | Say or type |
+|---|---|---|---|
+| 0:00 | 12:55 | Seven line cards, most `▶ RUN`, clock chip `SIM 12:55 · ×120` | "A fictional factory, Tarnby Works: seven lines, about a hundred people, simulated live. Something goes wrong on Line 2 in about a minute." |
+| 0:12 | 12:58 hold | | "How are the lines doing right now?" |
+| 0:25 | 13:05 to 13:15 | Line 2's sealer temperature climbing, `WARN` at 190 °C, alarm ticker shows `M3-TEMP-HI` | At the 13:15 hold: "Is the sealer temperature normal?" |
+| 0:55 | 13:23 hold | Line 2 `■ STOPPED · SEALER_FAULT`, `M3-HEAT-OVR` in red with text and icon | "Why is line 2 down?" |
+| 1:10 | 13:30 | | Click Listen and dictate: "add handover note for line 2: sealer jaw ran hot again, tripped 13:23". Then "handover notes for line 2": the 10-21 note shows the same fault two days running |
+| 1:25 | 13:35 | Follow-ups gains an item | "add follow-up: inspect sealer thermocouple, owner Ravi, due 2026-10-24, line 2" |
+| 1:35 | 13:41 to 13:49 | Line 5 shows `COIL_JAM` and recovers | Voiceover only: "Not every stop is the story." |
+| 1:55 | 14:00 | Clock chip, shift B, lead Joel | "Shift summary for shift A": Line 2 at risk |
+| 2:05 | 14:03 | Line 2 back to `▶ RUN` | "Stock of heater band": 2 left, reorder |
+| 2:15 | 14:10 to 16:15 | `×300 TIME-LAPSE` on the chip | "Stock of HDPE" after about 16:20 shows the reorder |
+| 2:30 | | Open the trace drawer: `← push notifications/resources/updated` followed by `resources/read` | "The server pushed that; the page did not poll." |
+| 2:40 | | Title card | |
+
+Cut from this version: the container planner, the local model and the restart beat.
