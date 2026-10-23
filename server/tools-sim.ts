@@ -39,7 +39,7 @@ const liveLineShape = z.object({
   downtime_min: z.number(),
   crew: z.number(),
   open_alarms: z.array(z.object({ code: z.string(), severity: z.string(), text: z.string(), raised_at: z.string() })),
-  signals: z.array(z.object({ tag: z.string(), value: z.number(), unit: z.string(), warn_limit: z.number(), trip_limit: z.number() })),
+  signals: z.array(z.object({ tag: z.string(), value: z.number(), unit: z.string(), warn_limit: z.number(), trip_limit: z.number(), level: z.enum(['ok', 'warn', 'trip']).describe('ok below the warn limit, warn at or above it, trip at or above the trip limit') })),
 })
 
 export function registerSimTools(server: McpServer, sim: FactorySim): void {

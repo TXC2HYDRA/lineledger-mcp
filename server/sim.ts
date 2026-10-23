@@ -67,7 +67,7 @@ export interface LiveLine {
   downtime_min: number
   crew: number
   open_alarms: Omit<Alarm, 'line_id'>[]
-  signals: { tag: string; value: number; unit: string; warn_limit: number; trip_limit: number }[]
+  signals: { tag: string; value: number; unit: string; warn_limit: number; trip_limit: number; level: 'ok' | 'warn' | 'trip' }[]
 }
 
 export interface Snapshot {
@@ -558,7 +558,7 @@ export class FactorySim {
       downtime_min: Math.round(l.downtimeMin),
       crew: this.onShift(l) ? (this.shift === 'C' ? (l.spec.crew_c ?? l.spec.crew) : l.spec.crew) : 0,
       open_alarms: this.alarms.filter((a) => a.line_id === l.spec.id).map(({ line_id: _, ...a }) => a),
-      signals: l.signals.map((s) => ({ tag: s.spec.tag, value: round1(s.value), unit: s.spec.unit, warn_limit: s.spec.warn, trip_limit: s.spec.trip })),
+      signals: l.signals.map((s) => ({ tag: s.spec.tag, value: round1(s.value), unit: s.spec.unit, warn_limit: s.spec.warn, trip_limit: s.spec.trip, level: s.value >= s.spec.trip ? ('trip' as const) : s.value >= s.spec.warn ? ('warn' as const) : ('ok' as const) })),
     }
   }
 

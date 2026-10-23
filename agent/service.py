@@ -58,7 +58,7 @@ SYSTEM_PROMPT = (
     "State only what the tool result says; do not add names or details. "
     "For the state of all lines call get_live_line_status once with no arguments and use roll_up and each line's state; "
     "for one line pass line_id. A line is running only when its state is RUN; say the plant time (sim_now) and the reason_code of any stopped line. "
-    "A sensor is above its limit only when value is at or above trip_limit (warn_limit for a warning). "
+    "Report a sensor by its level field (ok, warn or trip) next to its value; never compare numbers yourself. "
     "Answer in one or two short sentences suitable for speech."
 )
 
