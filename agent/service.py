@@ -7,6 +7,7 @@ profile (D5). Any other model id, provider or AWS profile is refused at startup.
 import json
 import os
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -130,6 +131,57 @@ def build_agent(
     return agent
 
 
+SESSION_LOST = ("Session terminated", "Session not found")
+# The MCP server closes sessions idle for 30 minutes; rebuild before that so the agent never holds a dead one.
+REBUILD_AFTER_IDLE_S = 20 * 60
+
+
+def session_lost(agent: Agent) -> bool:
+    """True when a tool call in the last turn failed because the MCP session is gone (server restart or expiry)."""
+    for message in agent.messages:
+        for block in message.get("content", []):
+            result = block.get("toolResult") if isinstance(block, dict) else None
+            if result and result.get("status") == "error":
+                text = " ".join(str(c.get("text", "")) for c in result.get("content", []) if isinstance(c, dict))
+                if any(marker in text for marker in SESSION_LOST):
+                    return True
+    return False
+
+
+class AgentRunner:
+    """Owns the agent and its MCP session. One request at a time; a lost session is rebuilt and retried once."""
+
+    def __init__(self, factory=None) -> None:
+        self.factory = factory or build_agent
+        self.lock = threading.Lock()
+        self.agent = self.factory()
+        self.last_used = time.monotonic()
+        self.rebuilds = 0
+
+    def rebuild(self) -> None:
+        old = self.agent
+        self.agent = self.factory()
+        self.rebuilds += 1
+        try:
+            old.cleanup()
+        except Exception:  # noqa: BLE001  the old session may already be gone
+            pass
+
+    def answer(self, text: str):
+        with self.lock:
+            if time.monotonic() - self.last_used > REBUILD_AFTER_IDLE_S:
+                self.rebuild()
+            for attempt in (1, 2):
+                self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
+                result = self.agent(text)
+                if attempt == 1 and session_lost(self.agent):
+                    self.rebuild()
+                    continue
+                break
+            self.last_used = time.monotonic()
+            return result, tool_calls(self.agent, 0)
+
+
 def tool_calls(agent: Agent, since: int) -> list[dict]:
     calls = []
     for message in agent.messages[since:]:
@@ -149,7 +201,7 @@ def turn_usage(result) -> dict | None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    agent: Agent
+    runner: AgentRunner
     allowed_origins = {f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in (os.environ.get("WEB_PORT", "5173"),)}
 
     def _send(self, status: int, body: dict) -> None:
@@ -174,15 +226,13 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             return self._send(400, {"error": 'expected JSON {"text": "..."}'})
         started = time.monotonic()
-        self.agent.messages.clear()  # one request, one conversation: bounds context size and CPU time
-        before = 0
         try:
-            result = self.agent(text)
+            result, calls = self.runner.answer(text)
         except Exception as error:  # surface model/connection errors to the UI, never fake success
             return self._send(502, {"error": f"{type(error).__name__}: {error}"})
         body = {
             "reply": str(result).strip(),
-            "tool_calls": tool_calls(self.agent, before),
+            "tool_calls": calls,
             "seconds": round(time.monotonic() - started, 1),
             "provider": PROVIDER,
             "model": MODEL_ID,
@@ -198,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    Handler.agent = build_agent()
+    Handler.runner = AgentRunner()
     where = "local Ollama" if PROVIDER == "ollama" else f"Amazon Bedrock, {REGION}, profile {PROJECT_PROFILE}"
     print(f"LineLedger agent ({MODEL_ID}, {where}) on http://127.0.0.1:{PORT}/chat")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
