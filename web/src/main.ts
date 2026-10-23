@@ -257,9 +257,10 @@ function showContainer(d: Data) {
 
 const refreshAll = () => Promise.all([refreshShift(), refreshTrend(), refreshNotes(), refreshFollowUps()])
 
-// ---- planner mode: deterministic rules (default) or the local-model agent service -----------
+// ---- planner mode: deterministic rules (default) or the agent service (local Ollama or Amazon Bedrock) ----
 let modelMode = false
-async function askAgent(text: string): Promise<{ reply: string; tool_calls: { name: string }[]; seconds: number; model: string }> {
+type AgentReply = { reply: string; tool_calls: { name: string }[]; seconds: number; model: string; provider?: string; usage?: { totalTokens: number } | null }
+async function askAgent(text: string): Promise<AgentReply> {
   const res = await fetch('/agent/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) })
   const body = (await res.json().catch(() => ({}))) as Data
   if (!res.ok) throw new Error(body.error ?? `agent service returned HTTP ${res.status}`)
@@ -274,15 +275,17 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
   busy = true
   addMessage('You', text, 'user')
   if (modelMode) {
-    setVoice('thinking', 'Local model is working. This can take a while on CPU.')
+    setVoice('thinking', 'The agent model is working. A local model can take a while on CPU.')
     try {
       const r = await askAgent(text)
       const tools = r.tool_calls.map((c) => c.name).join(', ') || 'none'
-      addMessage('LineLedger', `${r.reply}\n[local model ${r.model} · ${r.seconds} s · tools: ${tools}]`)
+      const where = r.provider === 'bedrock' ? 'Amazon Bedrock' : 'local model'
+      const tokens = r.usage ? ` · ${r.usage.totalTokens} tokens` : ''
+      addMessage('LineLedger', `${r.reply}\n[${where} ${r.model} · ${r.seconds} s${tokens} · tools: ${tools}]`)
       void refreshAll()
       finish(r.reply, fromVoice)
     } catch (e) {
-      const message = `Local model unavailable: ${errorText(e)}. Switch the planner back to rules.`
+      const message = `Agent model unavailable: ${errorText(e)}. Switch the planner back to rules.`
       addMessage('LineLedger', message, 'error')
       setVoice('error', message)
     } finally {
@@ -414,7 +417,7 @@ const modeBtn = $('mode') as HTMLButtonElement
 modeBtn.addEventListener('click', () => {
   modelMode = !modelMode
   modeBtn.setAttribute('aria-pressed', String(modelMode))
-  modeBtn.textContent = modelMode ? 'Planner: local model' : 'Planner: rules (no LLM)'
+  modeBtn.textContent = modelMode ? 'Planner: agent model' : 'Planner: rules (no LLM)'
 })
 $('stop-speech').addEventListener('click', () => {
   stopSpeaking()
@@ -604,7 +607,8 @@ themeBtn.addEventListener('click', () => {
 })
 
 // ---- start ----------------------------------------------------------------------------------
-const connectedText = () => `MCP connected · protocol ${mcp.protocolVersion}${mcp.sessionId ? ' · live session' : ''}`
+let storeNote = ''
+const connectedText = () => `MCP connected · protocol ${mcp.protocolVersion}${storeNote}${mcp.sessionId ? ' · live session' : ''}`
 startTrace()
 void (async () => {
   try {
@@ -615,6 +619,10 @@ void (async () => {
     }
     mcp.onReconnect = () => setConn('connected', connectedText())
     await mcp.connect()
+    // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
+    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string }
+    const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ' · store: SQLite' : ''
+    storeNote = store
     setConn('connected', connectedText())
     addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()

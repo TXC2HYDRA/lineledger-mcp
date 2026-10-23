@@ -8,7 +8,8 @@ import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/type
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { McpConnection } from '../web/src/mcp.js'
 import { createApp } from '../server/app.js'
-import { openDb, type Db } from '../server/db.js'
+import { SqliteStore } from '../server/store-sqlite.js'
+import type { Store } from '../server/store.js'
 
 const ORIGIN = 'http://localhost:5173'
 const HEADERS = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }
@@ -19,7 +20,7 @@ const INIT = {
   params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'raw', version: '0' } },
 }
 
-let db: Db
+let store: Store
 let http: Server
 let url: string
 const clients: Client[] = []
@@ -27,12 +28,12 @@ const connections: McpConnection[] = []
 
 const listen = (port = 0) =>
   new Promise<Server>((resolve) => {
-    const s = createApp({ db, allowedOrigins: [ORIGIN], stateful: true }).listen(port, '127.0.0.1', () => resolve(s))
+    const s = createApp({ store, allowedOrigins: [ORIGIN], stateful: true }).listen(port, '127.0.0.1', () => resolve(s))
   })
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 beforeEach(async () => {
-  db = openDb()
+  store = SqliteStore.open()
   http = await listen()
   url = `http://127.0.0.1:${(http.address() as AddressInfo).port}`
 })
@@ -40,7 +41,7 @@ afterEach(async () => {
   await Promise.all([...clients.splice(0).map((c) => c.close()), ...connections.splice(0).map((c) => c.close())])
   http.closeAllConnections()
   http.close()
-  db.close()
+  await store.close()
 })
 
 async function connect() {

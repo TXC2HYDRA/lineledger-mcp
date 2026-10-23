@@ -19,15 +19,19 @@ and the microphone starts only after you click Listen.
 
 ## Zero-cost, local-first
 
-No paid service, no cloud API calls, no credentials in this repository. The optional language-model
-agent runs against a local Ollama server on loopback only.
+By default: no paid service, no cloud API calls, no credentials in this repository. The optional
+language-model agent runs against a local Ollama server on loopback only.
+
+Two AWS integrations are available as opt-in switches (Amazon Bedrock for the agent model, Amazon
+DynamoDB as the store). They are off unless you turn them on, and nothing in this repository needs an AWS
+account to run, test or judge it. See [AWS integrations](#aws-integrations-optional).
 
 ## What it does
 
 A plant manager can ask, by typing or speaking:
 
 - "shift summary": output versus target per line, with on-track, at-risk and behind status.
-- "add handover note for line 2: sealer jaw ran hot": saved in SQLite, kept across restarts.
+- "add handover note for line 2: sealer jaw ran hot": saved in the store (SQLite by default, or Amazon DynamoDB), kept across restarts.
 - "add follow-up: re-check guard, owner Ravi, due 2026-10-22, line 1", "open follow-ups", "close follow-up 3".
 - "stock of hdpe": stock level, reorder status and suggested purchase quantity.
 - "how many 600x400x300 12kg boxes fit in a 20ft container": calls the standalone
@@ -56,6 +60,7 @@ it). `PORT` changes the server port. To reset the demo data, stop the server and
 ```bash
 npm run typecheck        # server, tests, scripts and web
 npm test                 # vitest: MCP client over real HTTP against the LineLedger server, hardening, rule-based planner
+npm run test:dynamodb    # the same tests against the DynamoDB store on DynamoDB Local (see AWS integrations)
 npm run check:contrast   # recomputes WCAG contrast from web/src/style.css
 npm run build            # vite build -> dist/web
 npm run preflight:mcp    # raw initialize and SDK client both report protocolVersion 2025-11-25
@@ -100,17 +105,22 @@ Tools: `get_shift_summary`, `get_shift_history` (feeds the dashboard trend chart
 ## Architecture
 
 ```
-browser (web/)  --same-origin proxy-->  MCP server (server/)  -->  SQLite (node:sqlite)
-   chat, trace, dashboard                Express + MCP SDK          container-load-planner
-        |                                    ^
-        +--- optional: /agent proxy ---> agent/ (Strands + local Ollama) --MCP client--+
+browser (web/)  --same-origin proxy-->  MCP server (server/)  -->  store: SQLite (default)
+   chat, trace, dashboard                Express + MCP SDK            or Amazon DynamoDB (LINELEDGER_STORE=dynamodb)
+        |                                    ^                      container-load-planner
+        +--- optional: /agent proxy ---> agent/ (Strands) --MCP client--+
+                                           model: local Ollama (default)
+                                              or Amazon Nova on Bedrock (LINELEDGER_MODEL_PROVIDER=bedrock)
 ```
 
-- `server/`: TypeScript MCP server (Express 5, zod 4, `node:sqlite`).
+- `server/`: TypeScript MCP server (Express 5, zod 4). The tools talk to a `Store` interface
+  (`server/store.ts`) with two implementations: `store-sqlite.ts` (`node:sqlite`, default) and
+  `store-dynamodb.ts` (AWS SDK for JavaScript v3).
 - `web/`: Vite + vanilla TypeScript client. The default planner is a deterministic rule-based mapper
   (`web/src/planner.ts`, no LLM) from request text to tool calls.
-- `agent/`: optional Python service using Strands Agents with an explicit local Ollama model, the
-  MCP server's tools, an AWS-environment scrub and a loopback-only check.
+- `agent/`: optional Python service using Strands Agents with an explicit model (local Ollama by
+  default, Amazon Nova on Bedrock as an option), the MCP server's tools, an AWS-environment scrub and a
+  loopback-only check.
 - `docs/`: UI specification, implementation decisions, download manifest, friction log, product
   feedback and the demo video plan.
 
@@ -124,7 +134,8 @@ the rule-based planner.
 
 ```bash
 python3 -m venv .venv && .venv/bin/python -m pip install -r agent/requirements.txt
-npm run test:agent       # 3 tests: AWS env scrub, explicit OllamaModel, loopback-only, MCP tool discovery
+npm run test:agent       # 13 tests: AWS env scrub, explicit model, Nova-only and profile guards, loopback-only,
+                         # model-call cap, MCP tool discovery. No AWS call.
 ```
 
 Running the agent needs a local Ollama server (not installed by this repository). See
@@ -134,7 +145,63 @@ Running the agent needs a local Ollama server (not installed by this repository)
 npm run dev:agent        # http://127.0.0.1:8788, model qwen3:4b-instruct
 ```
 
-and press "Planner: local model" in the web client.
+and press "Planner: rules (no LLM)" in the web client to switch it to "Planner: agent model".
+
+## AWS integrations (optional)
+
+Status, 2026-10-22: code and tests are in this repository. They were run against a local DynamoDB
+emulator and with mocked AWS credentials only. **[OWNER: update this line after the live run, for
+example "Run against Amazon Bedrock (Nova Lite, us-east-1) and a DynamoDB table on a Free-plan account on
+2026-10-23", and link the graded spike table.]**
+
+| Service | Used for | Switch (default first) | Where in the code |
+|---|---|---|---|
+| Amazon Bedrock, Amazon Nova Lite | The agent's model, through the Strands Agents SDK `BedrockModel` and the Converse API | `LINELEDGER_MODEL_PROVIDER=ollama` / `bedrock` | `agent/service.py` (`build_model`), `agent/guard.py` |
+| Amazon DynamoDB | Notes, follow-ups, shift output, stock and id counters in one table | `LINELEDGER_STORE=sqlite` / `dynamodb` | `server/store-dynamodb.ts`, `server/store.ts` |
+
+Other switches: `LINELEDGER_BEDROCK_MODEL` (default `us.amazon.nova-lite-v1:0`, must start with
+`amazon.nova-` or `us.amazon.nova-`), `LINELEDGER_AWS_REGION` (default `us-east-1`),
+`LINELEDGER_DYNAMODB_TABLE` (default `lineledger`), `LINELEDGER_DYNAMODB_ENDPOINT` (DynamoDB Local, loopback
+only).
+
+### Safety rules in the code
+
+- Real AWS is reached only through a project-only profile: `AWS_PROFILE=lineledger`, with
+  `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` both inside `~/.aws-lineledger/`. Otherwise the agent
+  and the server refuse to start, so the machine's default `~/.aws` profile is never used by accident. Key
+  variables (`AWS_ACCESS_KEY_ID` and others) are refused or scrubbed; keys live only in the project file.
+- Bedrock: only Amazon Nova model ids. Anthropic and other Marketplace models are rejected at startup
+  (they need a card and are not free). `max_tokens` 512, at most 4 model calls per request, token usage
+  logged per turn and shown in the chat.
+- DynamoDB: one table, provisioned 5 RCU / 5 WCU, no index, stream, backup or replica, created with the AWS
+  CLI (`scripts/create-table.sh`), never from the console. Ids come from an atomic counter; closing a
+  follow-up is a conditional write. Reads are strongly consistent.
+- The IAM user for the project needs only `docs/aws-iam-policy.json` (replace `ACCOUNT_ID`).
+
+### Try the DynamoDB store locally (no AWS account)
+
+```bash
+docker run --rm -p 8000:8000 amazon/dynamodb-local:3.3.1     # DynamoDB Local, in memory
+npm run test:dynamodb                                        # every server and store test on both stores
+export LINELEDGER_DYNAMODB_ENDPOINT=http://127.0.0.1:8000
+npm run dynamodb:local-table && npm run dynamodb:seed
+LINELEDGER_STORE=dynamodb npm run dev:server                 # the page footer shows "store: Amazon DynamoDB"
+```
+
+### Run against AWS (owner only, Free-plan account)
+
+```bash
+export AWS_CONFIG_FILE=$HOME/.aws-lineledger/config AWS_SHARED_CREDENTIALS_FILE=$HOME/.aws-lineledger/credentials AWS_PROFILE=lineledger
+aws sts get-caller-identity                                  # must be the project account
+scripts/create-table.sh                                      # creates and checks the table
+npm run dynamodb:seed
+LINELEDGER_STORE=dynamodb npm run dev:server
+LINELEDGER_MODEL_PROVIDER=bedrock npm run dev:agent          # Nova Lite in us-east-1
+.venv/bin/python scripts/agent_spike.py > spike-nova-lite.md # 10 prompts, graded by hand afterwards
+```
+
+Teardown after judging: delete the table and the IAM user, check Billing shows no charge, delete
+`~/.aws-lineledger/`. The full plan, cost estimate and cut lines are in `docs/aws-integration-plan.md`.
 
 ## Limits
 

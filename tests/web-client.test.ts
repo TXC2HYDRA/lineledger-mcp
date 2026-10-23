@@ -5,19 +5,20 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { McpConnection } from '../web/src/mcp.js'
 import { createApp } from '../server/app.js'
-import { openDb, type Db } from '../server/db.js'
+import { SqliteStore } from '../server/store-sqlite.js'
+import type { Store } from '../server/store.js'
 
-let db: Db
+let store: Store
 let http: Server
 beforeEach(async () => {
-  db = openDb()
+  store = SqliteStore.open()
   http = await new Promise<Server>((resolve) => {
-    const s = createApp({ db, allowedOrigins: [] }).listen(0, '127.0.0.1', () => resolve(s))
+    const s = createApp({ store, allowedOrigins: [] }).listen(0, '127.0.0.1', () => resolve(s))
   })
 })
-afterEach(() => {
+afterEach(async () => {
   http.close()
-  db.close()
+  await store.close()
 })
 
 it('connects and calls tools with no session id against the stateless server', async () => {

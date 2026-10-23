@@ -78,16 +78,36 @@
   --color-danger: #B42318;
   --color-focus: #B03A06;
 
-  --glass-pct: 48%;
+  /* Frosted glass over a warm blurred backdrop: low fill, strong blur, a bright rim and a warm soft shadow. */
+  --mesh-a: #FFD9BA;          /* warm backdrop colours, blended smoothly (no shapes) */
+  --mesh-b: #FFE6C7;
+  --mesh-c: #FBD8C6;
+  --glass-pct: 42%;
   --pill-pct: 90%;
   --drawer-pct: 94%;
   --sheen-pct: 22%;
-  --lift-pct: 5%;
-  --lift-color: #000000;
+  --lift-pct: 45%;            /* controls and rows on glass are whiter than the glass, like the white pills in the reference */
+  --lift-color: #FFFFFF;
   --sheen-color: #FFFFFF;
-  --edge-color: #000000;
-  --edge-pct: 12%;
-  --glass-shadow: 0 10px 36px rgba(60, 40, 90, 0.16), inset 0 1px 0 color-mix(in srgb, #FFFFFF 70%, transparent);
+  --edge-color: #FFFFFF;
+  --edge-pct: 65%;
+  --glass-blur: 28px;
+  --radius-card: 18px;
+  --radius-panel: 26px;
+  --glass-shadow: 0 20px 50px rgba(120, 60, 20, 0.22), 0 0 0 1px rgba(150, 80, 40, 0.12), inset 0 1px 0 color-mix(in srgb, #FFFFFF 85%, transparent);
+}
+[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 800px at 88% -5%, var(--mesh-a), transparent 72%),
+    radial-gradient(1000px 800px at -5% 55%, var(--mesh-b), transparent 72%),
+    radial-gradient(1100px 800px at 100% 110%, var(--mesh-c), transparent 72%),
+    radial-gradient(900px 600px at 40% 55%, color-mix(in srgb, var(--mesh-c) 70%, transparent), transparent 75%),
+    var(--color-bg);
+  background-attachment: fixed;
+}
+[data-theme="light"] :is(.sidebar, .card:not(.add), #shift[data-state="loading"], #shift[data-state="error"], .voice-strip, .drawer) {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -401,7 +421,10 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 :root[data-layout="scroll"] #container-card { order: 6; }
 :root[data-layout="scroll"] #trace-card { order: 7; }
 /* each tool section is about one screen tall, so every sidebar link can bring its section to the top */
-:root[data-layout="scroll"] :is(#chat-card, #followups-card, #notes-card, #container-card) { grid-column: 1 / -1; min-height: max(480px, calc(100vh - 180px)); }
+:root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) { grid-column: 1 / -1; min-height: max(480px, calc(100vh - 180px)); }
+/* chat starts small and grows with the conversation up to one screen, then the transcript scrolls */
+:root[data-layout="scroll"] #chat-card { grid-column: 1 / -1; max-height: max(480px, calc(100vh - 180px)); }
+:root[data-layout="scroll"] #chat-card .transcript { flex: 0 1 auto; min-height: 0; }
 :root[data-layout="scroll"] :is(#followups-card, #notes-card, #container-card) {
   display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
   gap: var(--space-4) var(--space-6); align-content: start;

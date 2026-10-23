@@ -1,25 +1,23 @@
-import { mkdtempSync, rmSync } from 'node:fs'
 import { request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../server/app.js'
-import { openDb, type Db } from '../server/db.js'
+import type { Store } from '../server/store.js'
 import { TraceTap } from '../server/trace.js'
+import { HARNESSES } from './harness.js'
 
 const ORIGIN = 'http://localhost:5173'
 let http: Server
-let db: Db
+let store: Store
 let trace: TraceTap
 let url: string
 const clients: Client[] = []
 
-async function start(database: Db) {
+async function start(database: Store) {
   trace = new TraceTap()
-  const app = createApp({ db: database, trace, allowedOrigins: [ORIGIN] })
+  const app = createApp({ store: database, trace, allowedOrigins: [ORIGIN] })
   http = await new Promise<Server>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
   })
@@ -41,14 +39,15 @@ const call = async (client: Client, name: string, args: Record<string, unknown> 
     content: { type: string; text: string }[]
   }
 
+describe.each(HARNESSES)('$name store', (h) => {
 beforeEach(async () => {
-  db = openDb()
-  await start(db)
+  store = await h.open()
+  await start(store)
 })
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((c) => c.close()))
   http.close()
-  db.close()
+  await h.dispose(store)
 })
 
 describe('protocol', () => {
@@ -68,6 +67,10 @@ describe('protocol', () => {
       'plan_container_load',
     ])
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined()
+  })
+
+  it('reports which store is in use on /api/health', async () => {
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, stateful: false, sessions: 0 })
   })
 
   it('returns 405 on GET and DELETE /mcp', async () => {
@@ -128,11 +131,10 @@ describe('tools', () => {
     expect((await call(client, 'list_handover_notes', { limit: 51 })).isError).toBe(true)
   })
 
-  it('persists handover notes in a SQLite file across a restart', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lineledger-'))
+  it('persists handover notes across a restart', async () => {
+    const storage = await h.reopenable()
     try {
-      const file = join(dir, 'test.sqlite')
-      const first = openDb(file)
+      const first = await storage.open()
       http.close()
       await start(first)
       const { client } = await connect()
@@ -140,9 +142,9 @@ describe('tools', () => {
       await client.close()
       clients.length = 0
       http.close()
-      first.close()
+      await first.close()
 
-      const second = openDb(file)
+      const second = await storage.open()
       await start(second)
       const again = await connect()
       const notes = (await call(again.client, 'list_handover_notes', { limit: 50 })).structuredContent!.notes
@@ -151,12 +153,11 @@ describe('tools', () => {
       await again.client.close()
       clients.length = 0
       http.close()
-      second.close()
+      await second.close()
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      await storage.cleanup()
     }
-    db = openDb() // afterEach closes it
-    await start(db)
+    await start(store) // afterEach closes it
   })
 
   it('creates, lists and closes follow-ups', async () => {
@@ -183,7 +184,7 @@ describe('tools', () => {
     expect(band[0]).toMatchObject({ status: 'out_of_stock' })
     const steel = (await call(client, 'check_stock', { query: 'steel' })).structuredContent!.items
     expect(steel[0]).toMatchObject({ status: 'ok', suggested_order_qty: 0 })
-    db.prepare("UPDATE stock_items SET on_hand = reorder_point WHERE sku = 'LBL-ROLL'").run()
+    await h.setOnHand(store, 'LBL-ROLL', 20) // its reorder_point
     const edge = (await call(client, 'check_stock', { query: 'label' })).structuredContent!.items
     expect(edge[0]).toMatchObject({ status: 'reorder', suggested_order_qty: 60 }) // on_hand == reorder_point reorders
     expect((await call(client, 'check_stock', { query: 'nothing-like-this' })).structuredContent!.items).toEqual([])
@@ -213,10 +214,12 @@ describe('tools', () => {
   })
 
   it('applies the status thresholds and shift_date-only lookups', async () => {
-    db.prepare("INSERT INTO shift_output VALUES ('L1', '2026-10-22', 'A', 1000, 950, 0)").run() // exactly 95.0
-    db.prepare("INSERT INTO shift_output VALUES ('L2', '2026-10-22', 'A', 1000, 949, 0)").run() // 94.9
-    db.prepare("INSERT INTO shift_output VALUES ('L1', '2026-10-23', 'A', 1000, 800, 0)").run() // exactly 80.0
-    db.prepare("INSERT INTO shift_output VALUES ('L2', '2026-10-23', 'A', 1000, 799, 0)").run() // 79.9
+    const row = (line_id: string, shift_date: string, produced_units: number) =>
+      h.putShift(store, { line_id, shift_date, shift: 'A', target_units: 1000, produced_units, downtime_min: 0 })
+    await row('L1', '2026-10-22', 950) // exactly 95.0
+    await row('L2', '2026-10-22', 949) // 94.9
+    await row('L1', '2026-10-23', 800) // exactly 80.0
+    await row('L2', '2026-10-23', 799) // 79.9
     const { client } = await connect()
     const a = (await call(client, 'get_shift_summary', { shift_date: '2026-10-22' })).structuredContent!.lines
     expect([a[0].status, a[1].status]).toEqual(['on_track', 'at_risk'])
@@ -322,4 +325,5 @@ describe('trace tap', () => {
     const later = (await (await fetch(`${url}/api/trace?since=${entries.at(-1)!.id}`)).json()) as { entries: unknown[] }
     expect(later.entries).toEqual([])
   })
+})
 })

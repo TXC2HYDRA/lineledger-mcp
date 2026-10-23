@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { planContainerLoad } from 'container-load-planner'
 import * as z from 'zod/v4'
-import type { Db } from './db.js'
+import type { Store } from './store.js'
 
 const ok = (data: Record<string, unknown>): CallToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(data) }],
@@ -32,13 +32,10 @@ const followUpShape = {
   closed_at: z.string().nullable(),
 }
 
-type Row = Record<string, string | number | null>
-const lineExists = (db: Db, id: string): boolean => db.prepare('SELECT 1 FROM lines WHERE id = ?').get(id) !== undefined
-
 /** What a write tool changed. Stateful mode pushes this to every connected session. */
 export type ChangeResource = 'follow_ups' | 'handover_notes'
 
-export function registerTools(server: McpServer, db: Db, onChange: (resource: ChangeResource) => void = () => {}): void {
+export function registerTools(server: McpServer, store: Store, onChange: (resource: ChangeResource) => void = () => {}): void {
   server.registerTool(
     'get_shift_summary',
     {
@@ -68,33 +65,22 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       },
       annotations: READ,
     },
-    ({ shift_date, shift }) => {
-      const latest = db
-        .prepare(
-          `SELECT shift_date, shift FROM shift_output
-           WHERE (?1 IS NULL OR shift_date = ?1) AND (?2 IS NULL OR shift = ?2)
-           ORDER BY shift_date DESC, shift DESC LIMIT 1`,
-        )
-        .get(shift_date ?? null, shift ?? null) as { shift_date: string; shift: string } | undefined
-      if (!latest) return fail('No shift data for that date and shift.')
-      const rows = db
-        .prepare(
-          `SELECT s.line_id, l.name, l.product, s.target_units, s.produced_units, s.downtime_min
-           FROM shift_output s JOIN lines l ON l.id = s.line_id
-           WHERE s.shift_date = ? AND s.shift = ? ORDER BY s.line_id`,
-        )
-        .all(latest.shift_date, latest.shift) as Row[]
+    async ({ shift_date, shift }) => {
+      const found = await store.latestShift({ shift_date, shift })
+      if (!found) return fail('No shift data for that date and shift.')
+      const latest = { shift_date: found.shift_date, shift: found.shift }
+      const rows = await store.shiftLines(latest.shift_date, latest.shift)
       const pct = (produced: number, target: number) => Math.round((produced / target) * 1000) / 10
       const lines = rows.map((r) => {
-        const percent = pct(r.produced_units as number, r.target_units as number)
+        const percent = pct(r.produced_units, r.target_units)
         return {
-          line_id: r.line_id as string,
-          name: r.name as string,
-          product: r.product as string,
-          target_units: r.target_units as number,
-          produced_units: r.produced_units as number,
+          line_id: r.line_id,
+          name: r.name,
+          product: r.product,
+          target_units: r.target_units,
+          produced_units: r.produced_units,
           percent_of_target: percent,
-          downtime_min: r.downtime_min as number,
+          downtime_min: r.downtime_min,
           status: percent >= 95 ? ('on_track' as const) : percent >= 80 ? ('at_risk' as const) : ('behind' as const),
         }
       })
@@ -126,23 +112,15 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       },
       annotations: READ,
     },
-    ({ limit }) => {
-      const rows = db
-        .prepare(
-          `SELECT s.shift_date, s.shift, s.line_id, l.name, s.target_units, s.produced_units
-           FROM shift_output s JOIN lines l ON l.id = s.line_id
-           WHERE (s.shift_date, s.shift) IN (
-             SELECT shift_date, shift FROM shift_output GROUP BY shift_date, shift ORDER BY shift_date DESC, shift DESC LIMIT ?)
-           ORDER BY s.shift_date, s.shift, s.line_id`,
-        )
-        .all(limit) as Row[]
+    async ({ limit }) => {
+      const rows = await store.recentShifts(limit)
       type Entry = { shift_date: string; shift: string; lines: { line_id: string; name: string; percent_of_target: number }[] }
       const byShift = new Map<string, Entry>() // Map keeps insertion order, and the query is already oldest first
       for (const r of rows) {
         const key = `${r.shift_date}|${r.shift}`
-        const entry = byShift.get(key) ?? { shift_date: r.shift_date as string, shift: r.shift as string, lines: [] }
+        const entry = byShift.get(key) ?? { shift_date: r.shift_date, shift: r.shift, lines: [] }
         byShift.set(key, entry)
-        entry.lines.push({ line_id: r.line_id as string, name: r.name as string, percent_of_target: Math.round(((r.produced_units as number) / (r.target_units as number)) * 1000) / 10 })
+        entry.lines.push({ line_id: r.line_id, name: r.name, percent_of_target: Math.round((r.produced_units / r.target_units) * 1000) / 10 })
       }
       const shifts = [...byShift.values()]
       return ok({ shifts })
@@ -153,7 +131,7 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
     'create_handover_note',
     {
       title: 'Create handover note',
-      description: 'Save a shift handover note, optionally tied to one line. Stored in SQLite and kept across restarts.',
+      description: 'Save a shift handover note, optionally tied to one line. Stored in the configured store (SQLite by default, or Amazon DynamoDB) and kept across restarts.',
       inputSchema: {
         author: z.string().trim().min(1).max(60).describe('Who is writing, for example "Asha (shift A)"'),
         text: z.string().trim().min(1).max(500),
@@ -162,14 +140,11 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       outputSchema: noteShape,
       annotations: WRITE,
     },
-    ({ author, text, line_id }) => {
-      if (line_id && !lineExists(db, line_id)) return fail(`Unknown line "${line_id}".`)
-      const created_at = new Date().toISOString()
-      const { lastInsertRowid } = db
-        .prepare('INSERT INTO handover_notes (line_id, author, text, created_at) VALUES (?, ?, ?, ?)')
-        .run(line_id ?? null, author, text, created_at)
+    async ({ author, text, line_id }) => {
+      if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
+      const note = await store.addNote({ line_id: line_id ?? null, author, text, created_at: new Date().toISOString() })
       onChange('handover_notes')
-      return ok({ id: Number(lastInsertRowid), line_id: line_id ?? null, author, text, created_at })
+      return ok({ ...note })
     },
   )
 
@@ -185,13 +160,8 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       outputSchema: { notes: z.array(z.object(noteShape)) },
       annotations: READ,
     },
-    ({ line_id, limit }) => {
-      const notes = db
-        .prepare(
-          `SELECT id, line_id, author, text, created_at FROM handover_notes
-           WHERE (?1 IS NULL OR line_id = ?1) ORDER BY created_at DESC, id DESC LIMIT ?2`,
-        )
-        .all(line_id ?? null, limit) as Row[]
+    async ({ line_id, limit }) => {
+      const notes = await store.listNotes({ line_id, limit })
       return ok({ notes })
     },
   )
@@ -210,23 +180,11 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       outputSchema: followUpShape,
       annotations: WRITE,
     },
-    ({ title, owner, line_id, due_date }) => {
-      if (line_id && !lineExists(db, line_id)) return fail(`Unknown line "${line_id}".`)
-      const created_at = new Date().toISOString()
-      const { lastInsertRowid } = db
-        .prepare('INSERT INTO follow_ups (title, owner, line_id, due_date, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(title, owner, line_id ?? null, due_date ?? null, created_at)
+    async ({ title, owner, line_id, due_date }) => {
+      if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
+      const followUp = await store.addFollowUp({ title, owner, line_id: line_id ?? null, due_date: due_date ?? null, created_at: new Date().toISOString() })
       onChange('follow_ups')
-      return ok({
-        id: Number(lastInsertRowid),
-        title,
-        owner,
-        line_id: line_id ?? null,
-        due_date: due_date ?? null,
-        status: 'open',
-        created_at,
-        closed_at: null,
-      })
+      return ok({ ...followUp })
     },
   )
 
@@ -242,14 +200,8 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       outputSchema: { follow_ups: z.array(z.object(followUpShape)) },
       annotations: READ,
     },
-    ({ status, line_id }) => {
-      const follow_ups = db
-        .prepare(
-          `SELECT * FROM follow_ups
-           WHERE (?1 = 'all' OR status = ?1) AND (?2 IS NULL OR line_id = ?2)
-           ORDER BY due_date IS NULL, due_date, id`,
-        )
-        .all(status, line_id ?? null) as Row[]
+    async ({ status, line_id }) => {
+      const follow_ups = await store.listFollowUps({ status, line_id })
       return ok({ follow_ups })
     },
   )
@@ -263,13 +215,12 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       outputSchema: followUpShape,
       annotations: { ...WRITE, idempotentHint: true },
     },
-    ({ id }) => {
-      const row = db.prepare('SELECT status FROM follow_ups WHERE id = ?').get(id) as { status: string } | undefined
-      if (!row) return fail(`Follow-up ${id} not found.`)
-      if (row.status === 'closed') return fail(`Follow-up ${id} is already closed.`)
-      db.prepare("UPDATE follow_ups SET status = 'closed', closed_at = ? WHERE id = ?").run(new Date().toISOString(), id)
+    async ({ id }) => {
+      const result = await store.closeFollowUp(id, new Date().toISOString())
+      if (result === 'not_found') return fail(`Follow-up ${id} not found.`)
+      if (result === 'already_closed') return fail(`Follow-up ${id} is already closed.`)
       onChange('follow_ups')
-      return ok(db.prepare('SELECT * FROM follow_ups WHERE id = ?').get(id) as Row)
+      return ok({ ...result })
     },
   )
 
@@ -297,26 +248,21 @@ export function registerTools(server: McpServer, db: Db, onChange: (resource: Ch
       },
       annotations: READ,
     },
-    ({ query }) => {
-      const rows = db
-        .prepare(
-          `SELECT * FROM stock_items
-           WHERE instr(lower(sku), lower(?1)) > 0 OR instr(lower(name), lower(?1)) > 0 ORDER BY sku`,
-        )
-        .all(query) as Row[]
+    async ({ query }) => {
+      const rows = await store.findStock(query)
       const items = rows.map((r) => {
-        const onHand = r.on_hand as number
-        const status = onHand === 0 ? ('out_of_stock' as const) : onHand <= (r.reorder_point as number) ? ('reorder' as const) : ('ok' as const)
+        const onHand = r.on_hand
+        const status = onHand === 0 ? ('out_of_stock' as const) : onHand <= r.reorder_point ? ('reorder' as const) : ('ok' as const)
         return {
-          sku: r.sku as string,
-          name: r.name as string,
-          unit: r.unit as string,
+          sku: r.sku,
+          name: r.name,
+          unit: r.unit,
           on_hand: onHand,
-          reorder_point: r.reorder_point as number,
+          reorder_point: r.reorder_point,
           status,
-          suggested_order_qty: status === 'ok' ? 0 : (r.reorder_qty as number),
-          lead_days: r.lead_days as number,
-          supplier: r.supplier as string,
+          suggested_order_qty: status === 'ok' ? 0 : r.reorder_qty,
+          lead_days: r.lead_days,
+          supplier: r.supplier,
         }
       })
       return ok({ items })
