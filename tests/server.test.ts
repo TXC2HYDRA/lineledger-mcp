@@ -2,26 +2,39 @@ import { request as httpRequest, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createApp } from '../server/app.js'
+import { createApp, type AppOptions } from '../server/app.js'
+import { FactorySim } from '../server/sim.js'
 import type { Store } from '../server/store.js'
 import { TraceTap } from '../server/trace.js'
 import { HARNESSES } from './harness.js'
 
 const ORIGIN = 'http://localhost:5173'
 let http: Server
+let app: ReturnType<typeof createApp>
 let store: Store
+let sim: FactorySim
 let trace: TraceTap
 let url: string
 const clients: Client[] = []
 
-async function start(database: Store) {
+// The simulation runs without its timer here (faults off); tests advance it explicitly.
+async function start(database: Store, options: Partial<AppOptions> = {}) {
   trace = new TraceTap()
-  const app = createApp({ store: database, trace, allowedOrigins: [ORIGIN] })
+  sim = await FactorySim.create(database, { faults: 'off' })
+  app = createApp({ store: database, sim, trace, allowedOrigins: [ORIGIN], notifyEveryMs: 50, ...options })
   http = await new Promise<Server>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
   })
   url = `http://127.0.0.1:${(http.address() as AddressInfo).port}`
+}
+
+async function stop() {
+  await Promise.all(clients.splice(0).map((c) => c.close()))
+  await app.sessions.closeAll()
+  http.closeAllConnections()
+  http.close()
 }
 
 async function connect() {
@@ -45,8 +58,7 @@ beforeEach(async () => {
   await start(store)
 })
 afterEach(async () => {
-  await Promise.all(clients.splice(0).map((c) => c.close()))
-  http.close()
+  await stop()
   await h.dispose(store)
 })
 
@@ -62,23 +74,190 @@ describe('protocol', () => {
       'create_handover_note',
       'get_shift_history',
       'get_shift_summary',
+      'clear_fault',
+      'get_factory_events',
+      'get_line_status',
+      'inject_fault',
       'list_follow_ups',
       'list_handover_notes',
       'plan_container_load',
-    ])
+      'receive_stock',
+      'set_line_running',
+    ].sort())
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined()
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: true })
   })
 
-  it('returns 405 on GET and DELETE /mcp', async () => {
+  it('lists the factory resources', async () => {
+    const { client } = await connect()
+    const { resources } = await client.listResources()
+    expect(resources.map((r) => r.uri).sort()).toEqual(['factory://events', 'factory://status'])
+    const read = await client.readResource({ uri: 'factory://status' })
+    expect(JSON.parse((read.contents[0] as { text: string }).text)).toMatchObject({ shift_date: '2026-10-22', shift: 'A' })
+  })
+})
+
+describe('stateful sessions', () => {
+  const initBody = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+  })
+  const headers = (extra: Record<string, string> = {}) => ({ 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...extra })
+
+  it('gives each client its own session id and keeps it across calls', async () => {
+    const a = await connect()
+    const b = await connect()
+    expect(a.transport.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(b.transport.sessionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(a.transport.sessionId).not.toBe(b.transport.sessionId)
+    expect(app.sessions.size).toBe(2)
+    expect((await call(a.client, 'check_stock', { query: 'steel' })).isError).toBeFalsy()
+    expect((await call(b.client, 'check_stock', { query: 'steel' })).isError).toBeFalsy()
+    expect(app.sessions.size).toBe(2) // later calls reuse the sessions
+  })
+
+  it('rejects requests without a session (400) and with an unknown session (404)', async () => {
+    const list = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers(), body: list })).status).toBe(400)
+    const unknown = { 'mcp-session-id': '00000000-0000-4000-8000-000000000000' }
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers(unknown), body: list })).status).toBe(404)
+    for (const method of ['GET', 'DELETE']) {
+      expect((await fetch(`${url}/mcp`, { method })).status, method).toBe(400)
+      expect((await fetch(`${url}/mcp`, { method, headers: unknown })).status, method).toBe(404)
+    }
+  })
+
+  it('initialize over raw HTTP returns the session id header', async () => {
+    const res = await fetch(`${url}/mcp`, { method: 'POST', headers: headers(), body: initBody })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('mcp-session-id')).toMatch(/^[0-9a-f-]{36}$/)
+    await res.text()
+  })
+
+  it('DELETE ends the session; the old id is then unknown', async () => {
+    const { client, transport } = await connect()
+    const id = transport.sessionId!
+    await transport.terminateSession()
+    expect(app.sessions.size).toBe(0)
+    const list = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list' })
+    expect((await fetch(`${url}/mcp`, { method: 'POST', headers: headers({ 'mcp-session-id': id }), body: list })).status).toBe(404)
+    await expect(client.listTools()).rejects.toThrow()
+  })
+
+  it('closes idle sessions and the least recently used one past the cap', async () => {
+    await stop()
+    await start(store, { sessionIdleMs: 300, maxSessions: 2 })
+    const first = await connect()
+    await connect()
+    await connect() // over the cap: the first session is closed
+    await new Promise((r) => setTimeout(r, 20))
+    expect(app.sessions.size).toBe(2)
+    await expect(first.client.listTools()).rejects.toThrow()
+    await new Promise((r) => setTimeout(r, 700))
+    expect(app.sessions.size).toBe(0) // idle for longer than 300 ms
+  })
+
+  it('pushes resource updates to subscribed sessions only', async () => {
+    const watcher = await connect()
+    const other = await connect()
+    const seen: string[] = []
+    const otherSeen: string[] = []
+    watcher.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void seen.push(n.params.uri))
+    other.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void otherSeen.push(n.params.uri))
+    await watcher.client.subscribeResource({ uri: 'factory://status' })
+    await watcher.client.subscribeResource({ uri: 'factory://events' })
+    await expect(watcher.client.subscribeResource({ uri: 'factory://nothing' })).rejects.toThrow(/Unknown resource/)
+    await new Promise((r) => setTimeout(r, 200)) // the GET event stream opens after initialize
+    await call(other.client, 'inject_fault', { line_id: 'L1', station_id: 'press' })
+    await expect.poll(() => seen.sort(), { timeout: 3000 }).toEqual(['factory://events', 'factory://status'])
+    expect(otherSeen).toEqual([])
+    const status = JSON.parse(((await watcher.client.readResource({ uri: 'factory://status' })).contents[0] as { text: string }).text)
+    expect(status.lines[0]).toMatchObject({ line_id: 'L1', state: 'down' })
+    // the push went out on the session's GET stream and shows in the trace
+    const { entries } = (await (await fetch(`${url}/api/trace`)).json()) as { entries: { dir: string; message: any }[] }
+    expect(entries.some((e) => e.dir === 'out' && e.message.method === 'notifications/resources/updated')).toBe(true)
+    await watcher.client.unsubscribeResource({ uri: 'factory://status' })
+    seen.length = 0
+    await call(other.client, 'clear_fault', { line_id: 'L1' })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(seen).toEqual(['factory://events'])
+  })
+
+  it('still serves every tool in the optional stateless mode', async () => {
+    await stop()
+    await start(store, { mode: 'stateless' })
+    const { client, transport } = await connect()
+    expect(transport.sessionId).toBeUndefined()
+    expect((await client.listTools()).tools).toHaveLength(15)
+    expect((await call(client, 'get_line_status', { line_id: 'L2' })).structuredContent!.lines).toHaveLength(1)
     for (const method of ['GET', 'DELETE']) {
       const res = await fetch(`${url}/mcp`, { method })
       expect(res.status).toBe(405)
       expect(res.headers.get('allow')).toBe('POST')
     }
+  })
+})
+
+describe('simulation tools', () => {
+  it('reports live line status and follows faults, repairs, stops and stock receipts', async () => {
+    const { client } = await connect()
+    const status = (await call(client, 'get_line_status')).structuredContent!
+    expect(status).toMatchObject({ shift_date: '2026-10-22', shift: 'A', shift_elapsed_min: 0 })
+    expect(status.lines.map((l: { state: string }) => l.state)).toEqual(['running', 'running'])
+    await sim.advance(60 * 60_000)
+    const l1 = (await call(client, 'get_line_status', { line_id: 'L1' })).structuredContent!.lines[0]
+    expect(l1.produced_units).toBeGreaterThan(140)
+    expect(l1.pace).toBe('on_track')
+
+    const fault = await call(client, 'inject_fault', { line_id: 'L2', station_id: 'sealer', reason: 'Heater band failed' })
+    expect(fault.structuredContent!.line).toMatchObject({ state: 'down' })
+    const sealer = fault.structuredContent!.line.stations.find((s: { station_id: string }) => s.station_id === 'sealer')
+    expect(sealer).toMatchObject({ state: 'down', fault: 'Heater band failed', waiting_for_part: 'HTR-BAND' })
+    const blocked = await call(client, 'clear_fault', { line_id: 'L2' })
+    expect(blocked.isError).toBe(true)
+    expect(blocked.content[0]!.text).toMatch(/HTR-BAND/)
+    const received = await call(client, 'receive_stock', { sku: 'htr-band', quantity: 2 })
+    expect(received.structuredContent).toMatchObject({ sku: 'HTR-BAND', on_hand: 1 }) // one went straight into the repair
+    expect((await call(client, 'check_stock', { query: 'HTR-BAND' })).structuredContent!.items[0]).toMatchObject({ on_hand: 1, status: 'reorder' })
+    expect((await call(client, 'clear_fault', { line_id: 'L2', station_id: 'sealer' })).structuredContent!.line.state).toBe('running')
+
+    expect((await call(client, 'set_line_running', { line_id: 'L1', running: false })).structuredContent!.line.state).toBe('stopped')
+    expect((await call(client, 'set_line_running', { line_id: 'L1', running: false })).isError).toBe(true)
+    expect((await call(client, 'set_line_running', { line_id: 'L1', running: true })).structuredContent!.line.state).toBe('running')
+
+    const events = (await call(client, 'get_factory_events', { limit: 50 })).structuredContent!.events as { id: number; kind: string }[]
+    expect(events[0]!.id).toBeGreaterThan(events.at(-1)!.id) // newest first
+    expect(events.map((e) => e.kind)).toEqual(expect.arrayContaining(['fault', 'waiting_for_part', 'stock_received', 'repair_started', 'repaired', 'line_stopped', 'line_started']))
+    const onlyL1 = (await call(client, 'get_factory_events', { line_id: 'L1' })).structuredContent!.events as { line_id: string }[]
+    expect(onlyL1.every((e) => e.line_id === 'L1')).toBe(true)
+  })
+
+  it('rejects unknown lines, stations and SKUs with a useful message', async () => {
+    const { client } = await connect()
+    const text = (r: Awaited<ReturnType<typeof call>>) => r.content[0]!.text
+    expect(text(await call(client, 'inject_fault', { line_id: 'L1', station_id: 'sealer' }))).toMatch(/Stations: slitter, press, packer/)
+    expect((await call(client, 'get_line_status', { line_id: 'L9' })).isError).toBe(true)
+    expect(text(await call(client, 'clear_fault', { line_id: 'L1' }))).toMatch(/No open fault/)
+    expect(text(await call(client, 'receive_stock', { sku: 'NOPE', quantity: 1 }))).toMatch(/Unknown SKU/)
+    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 0 })).isError).toBe(true)
+    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 4 })).structuredContent!.on_hand).toBe(40)
+  })
+
+  it('a finished simulated shift shows up in the shift summary and history', async () => {
+    const { client } = await connect()
+    await sim.advance(8 * 60 * 60_000)
+    const summary = (await call(client, 'get_shift_summary')).structuredContent!
+    expect(summary).toMatchObject({ shift_date: '2026-10-22', shift: 'A' })
+    expect(summary.lines[0].produced_units).toBeGreaterThan(1100)
+    expect(summary.lines[1].status).toBe('behind') // Line 2 ran out of HDPE
+    const history = (await call(client, 'get_shift_history', { limit: 2 })).structuredContent!.shifts
+    expect(history.map((s: { shift_date: string; shift: string }) => `${s.shift_date} ${s.shift}`)).toEqual(['2026-10-21 B', '2026-10-22 A'])
+    expect((await call(client, 'get_line_status')).structuredContent).toMatchObject({ shift: 'B', shift_elapsed_min: 0 })
   })
 })
 
@@ -135,13 +314,11 @@ describe('tools', () => {
     const storage = await h.reopenable()
     try {
       const first = await storage.open()
-      http.close()
+      await stop()
       await start(first)
       const { client } = await connect()
       await call(client, 'create_handover_note', { author: 'Test', text: 'Persist me' })
-      await client.close()
-      clients.length = 0
-      http.close()
+      await stop()
       await first.close()
 
       const second = await storage.open()
@@ -150,9 +327,7 @@ describe('tools', () => {
       const notes = (await call(again.client, 'list_handover_notes', { limit: 50 })).structuredContent!.notes
       expect(notes.some((n: { text: string }) => n.text === 'Persist me')).toBe(true)
       expect(notes).toHaveLength(3) // 2 seeded once, not reseeded, plus the new one
-      await again.client.close()
-      clients.length = 0
-      http.close()
+      await stop()
       await second.close()
     } finally {
       await storage.cleanup()
