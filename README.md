@@ -303,18 +303,12 @@ instead. First run: `npx playwright install chromium`.
 
 ## Limits
 
-- Microphone input and speech output: not tested outside a headless browser run.
-- The simulation is a planning-grade model, not a digital twin: independent lines (no buffer between
-  Line 2 and Line 3), exponential failures, lognormal repairs, micro-stops folded into a slower cycle, stops
-  counted to the minute. All of its numbers are synthetic and were tuned, not measured.
 - The simulation runs inside the server process. A real deployment would receive machine data from an
   edge gateway (OPC UA, Modbus or MQTT to an ingest endpoint); no such ingest was built.
 - The plant percent in the shift summary adds different products (brackets, crates, kits) weighted by
   target. It is a target-weighted figure, not a physical quantity.
 - MCP sessions live in one server process's memory, so the server cannot be scaled out or run on
   serverless as is; use `LINELEDGER_MCP_MODE=stateless` for that, which gives up server push.
-- Speech recognition accuracy in a loud factory is not claimed.
-- Production `vite preview` and a full real-keyboard pass are not tested.
 
 ## License
 
