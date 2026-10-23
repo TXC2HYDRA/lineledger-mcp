@@ -1,4 +1,5 @@
 import { createApp, type McpMode } from './app.js'
+import { applyPlantSeed } from './plant.js'
 import { FactorySim } from './sim.js'
 import { openStore } from './store.js'
 
@@ -10,24 +11,32 @@ const allowedOrigins = process.env.LINELEDGER_ALLOWED_ORIGINS?.split(',').map((o
 const mode = (process.env.LINELEDGER_MCP_MODE ?? 'stateful').trim().toLowerCase() as McpMode
 if (mode !== 'stateful' && mode !== 'stateless') throw new Error(`LINELEDGER_MCP_MODE must be stateful or stateless, got "${mode}"`)
 
+// Plant profile (LINELEDGER_PLANT=1): the Tarnby Works simulation with seven lines, in its own SQLite file by
+// default. Without it the server keeps the small two-line seed and no simulation (the tests use that profile).
+const plant = process.env.LINELEDGER_PLANT === '1'
+if (plant && !process.env.LINELEDGER_DB) process.env.LINELEDGER_DB = 'data/plant.sqlite'
+
 // LINELEDGER_STORE=sqlite (default, LINELEDGER_DB file) or dynamodb (see server/store-dynamodb.ts).
 const store = await openStore(process.env)
 
-// Production-line simulation: on by default. LINELEDGER_SIM=off disables it.
-// LINELEDGER_SIM_SPEED: simulated seconds per real second (default 60, so one 8-hour shift takes 8 minutes).
 let sim: FactorySim | undefined
-if ((process.env.LINELEDGER_SIM ?? 'on').trim().toLowerCase() !== 'off') {
-  const speed = Number(process.env.LINELEDGER_SIM_SPEED ?? 60)
+if (plant) {
+  await applyPlantSeed(store)
+  // LINELEDGER_SIM_SPEED: simulated seconds per real second (default 120: one simulated hour in 30 seconds).
+  const speed = Number(process.env.LINELEDGER_SIM_SPEED ?? 120)
   if (!Number.isFinite(speed) || speed <= 0 || speed > 3600) throw new Error('LINELEDGER_SIM_SPEED must be a number from 0 to 3600')
-  const faults = process.env.LINELEDGER_SIM_FAULTS === 'off' ? 'off' : 'random'
-  sim = await FactorySim.create(store, { faults, seed: Number(process.env.LINELEDGER_SIM_SEED ?? 20261022) })
-  sim.start({ speed })
+  sim = await FactorySim.create(store, {
+    faults: process.env.LINELEDGER_SIM_FAULTS === 'off' ? 'off' : 'random',
+    story: process.env.LINELEDGER_SIM_STORY !== 'off',
+    ...(process.env.LINELEDGER_SIM_SEED && { seed: Number(process.env.LINELEDGER_SIM_SEED) }),
+  })
+  sim.start({ speed, holds: process.env.LINELEDGER_SIM_HOLDS === 'on' })
 }
 
 const app = createApp({ store, sim, allowedOrigins, mode })
 // Bind to loopback only.
 const http = app.listen(port, '127.0.0.1', () => {
-  const simText = sim ? `simulation on (x${process.env.LINELEDGER_SIM_SPEED ?? 60})` : 'simulation off'
+  const simText = sim ? `Tarnby Works plant simulation, sim clock ${sim.snapshot().sim_clock.sim_now}` : 'seed data, no simulation'
   console.log(`LineLedger MCP server (synthetic demo data, store: ${store.kind}, ${mode}, ${simText}) on http://127.0.0.1:${port}/mcp`)
 })
 

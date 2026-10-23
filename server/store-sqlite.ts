@@ -1,6 +1,6 @@
 // Default store: one node:sqlite file. The SQL is the same the tools used before the store interface existed.
 import { openDb, type Db } from './db.js'
-import type { FollowUpRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store } from './store.js'
+import type { FollowUpRow, LineRow, NoteRow, ShiftLineRow, ShiftOutputRow, StockRow, Store } from './store.js'
 
 export class SqliteStore implements Store {
   readonly kind = 'sqlite' as const
@@ -105,6 +105,16 @@ export class SqliteStore implements Store {
 
   async setStockOnHand(sku: string, onHand: number): Promise<void> {
     this.db.prepare('UPDATE stock_items SET on_hand = ? WHERE sku = ?').run(onHand, sku)
+  }
+
+  async addLine(l: LineRow): Promise<void> {
+    this.db.prepare('INSERT OR IGNORE INTO lines (id, name, product) VALUES (?, ?, ?)').run(l.id, l.name, l.product)
+  }
+
+  async putStockItem(s: StockRow): Promise<void> {
+    this.db
+      .prepare('INSERT OR REPLACE INTO stock_items (sku, name, unit, on_hand, reorder_point, reorder_qty, lead_days, supplier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.sku, s.name, s.unit, s.on_hand, s.reorder_point, s.reorder_qty, s.lead_days, s.supplier)
   }
 
   async close(): Promise<void> {

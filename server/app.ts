@@ -14,14 +14,14 @@ import {
 import type { FactorySim } from './sim.js'
 import type { Store } from './store.js'
 import { registerTools } from './tools.js'
-import { EVENTS_URI, FACTORY_RESOURCES, registerFactoryResources, registerSimTools, STATUS_URI } from './tools-sim.js'
+import { PLANT_RESOURCES, registerPlantResources, registerSimTools, SNAPSHOT_URI } from './tools-sim.js'
 import { TraceTap } from './trace.js'
 
 export type McpMode = 'stateful' | 'stateless'
 
 export interface AppOptions {
   store: Store
-  /** The production-line simulation. Without it the simulation tools and resources are not offered. */
+  /** The plant simulation (plant profile). Without it the simulation tools and the snapshot resource are not offered. */
   sim?: FactorySim
   trace?: TraceTap
   /** Browser origins allowed to call the server. Requests without an Origin header (non-browser clients) pass. */
@@ -137,13 +137,13 @@ export function createApp({
       { name: 'lineledger', version: '0.2.0' },
       subscriptions && sim ? { capabilities: { resources: { subscribe: true, listChanged: true } } } : undefined,
     )
-    registerTools(server, store)
+    registerTools(server, store, sim)
     if (sim) {
       registerSimTools(server, sim)
-      registerFactoryResources(server, sim)
+      registerPlantResources(server, sim)
       if (subscriptions) {
         server.server.setRequestHandler(SubscribeRequestSchema, async ({ params }) => {
-          if (!(FACTORY_RESOURCES as readonly string[]).includes(params.uri)) throw new McpError(ErrorCode.InvalidParams, `Unknown resource ${params.uri}`)
+          if (!(PLANT_RESOURCES as readonly string[]).includes(params.uri)) throw new McpError(ErrorCode.InvalidParams, `Unknown resource ${params.uri}`)
           subscriptions.add(params.uri)
           return {}
         })
@@ -267,12 +267,7 @@ export function createApp({
           timer?.unref?.()
         }
       }
-      const statusChanged = throttled(STATUS_URI)
-      const eventsChanged = throttled(EVENTS_URI)
-      sim.onChange(({ events }) => {
-        statusChanged()
-        if (events) eventsChanged()
-      })
+      sim.onChange(throttled(SNAPSHOT_URI))
     }
   }
 

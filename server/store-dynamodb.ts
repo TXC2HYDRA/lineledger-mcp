@@ -283,6 +283,16 @@ export class DynamoDbStore implements Store {
     })
   }
 
+  async addLine(line: LineRow): Promise<void> {
+    await this.putNew({ ...keys.line(line.id), ...line }).catch((error: unknown) => {
+      if (!isConditionalFailure(error)) throw error
+    })
+  }
+
+  async putStockItem(item: StockRow): Promise<void> {
+    await this.doc.send(new PutCommand({ TableName: this.table, Item: { ...keys.stock(item.sku), ...toStock(item as unknown as Item) } }))
+  }
+
   /** Writes the synthetic demo data once per table. Returns true when it seeded. */
   async ensureSeeded(): Promise<boolean> {
     if (await this.get(keys.seed)) return false

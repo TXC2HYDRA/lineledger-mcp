@@ -1,165 +1,129 @@
-// A small production-line simulation behind the MCP tools. All of it is synthetic.
+// Production simulation of Tarnby Works (plant/plant.json), a fictional plant. Everything here is synthetic.
 //
-// Two serial lines, three stations each, no buffers: a line produces at its slowest station's rate while
-// every station is up, the operator has it running and its raw material is in stock. Stations fail at
-// random (seeded, exponential time between failures) and are repaired after a while; a failed sealer
-// heater band needs a spare part from stock. Material is drawn from stock per good unit. Shift A runs
-// 06:00-14:00 and shift B 14:00-22:00 in simulated plant time; there is no night shift, so the clock jumps
-// to the next morning. At the end of each shift the result is written to the store as a shift_output row,
-// which is what get_shift_summary and get_shift_history read.
+// Seven lines, stepped one simulated minute at a time. Per line and minute: planned breaks; random stops
+// (run time to the next stop is exponential with the line's MTBF, repair time lognormal around its median,
+// the reason drawn from the line's mix); cycle time = ideal x lognormal slowdown x warm-up after a restart;
+// rejects per unit with reject codes; raw material drawn per unit (a line waits when it runs out). Line 2's
+// heat sealer has a temperature sensor with warn and trip limits. Shift A 06:00-14:00 and B 14:00-22:00
+// run all lines; C 22:00-06:00 runs Lines 2 and 4. The story day (plant.json "story") scripts a sealer
+// overheat on Line 2 and a coil jam on Line 5 over the random model.
 //
-// The simulation keeps its live state in memory and writes stock levels and finished shifts to the store.
-// On restart it continues with the shift after the latest one on record.
-import type { ShiftOutputRow, Store } from './store.js'
+// LineLedger only reads this plant: no MCP tool starts, stops or repairs a line. The one write that touches
+// the simulation is a goods receipt (receive_stock), which is a business record, not a machine command.
+//
+// Live state is in memory. In-progress and finished shifts go to the store as shift_output rows, and
+// stock levels as stock_items.on_hand, so the existing tools read the simulation's output.
+import { PLANNED_MIN, PLANT, type PlantLine, type PlantSignal, type StoryBeat } from './plant.js'
+import type { Store } from './store.js'
 
-interface StationSpec {
-  id: string
-  name: string
-  cycleSec: number
-  mtbfMin: number
-  mttrMin: number
-  faults: string[]
-  /** A fault that needs a spare part from stock before the repair can start; `chance` of a random failure. */
-  partFault?: { reason: string; sku: string; chance: number }
-}
+export type ShiftId = 'A' | 'B' | 'C'
+export type LineState = 'RUN' | 'STOP_FAULT' | 'STOP_OTHER' | 'PLANNED_STOP' | 'IDLE_STARVED' | 'OFF_SHIFT'
+export type Pace = 'on_track' | 'at_risk' | 'behind'
 
-interface LineSpec {
-  id: string
-  targetPerShift: number
-  scrapRate: number
-  material: { sku: string; perUnit: number }
-  stations: StationSpec[]
-}
-
-export const LINE_SPECS: LineSpec[] = [
-  {
-    id: 'L1',
-    targetPerShift: 1200,
-    scrapRate: 0.012,
-    material: { sku: 'STL-040', perUnit: 0.35 },
-    stations: [
-      { id: 'slitter', name: 'Slitter', cycleSec: 20, mtbfMin: 600, mttrMin: 12, faults: ['Coil jam', 'Blade wear alarm'] },
-      { id: 'press', name: 'Press', cycleSec: 22.5, mtbfMin: 420, mttrMin: 18, faults: ['Die misfeed', 'Hydraulic pressure low'] },
-      { id: 'packer', name: 'Packer', cycleSec: 18, mtbfMin: 900, mttrMin: 8, faults: ['Carton magazine empty'] },
-    ],
-  },
-  {
-    id: 'L2',
-    targetPerShift: 800,
-    scrapRate: 0.02,
-    material: { sku: 'PLY-HDPE', perUnit: 1.2 },
-    stations: [
-      { id: 'extruder', name: 'Extruder', cycleSec: 30, mtbfMin: 720, mttrMin: 20, faults: ['Barrel zone 3 over temperature'] },
-      { id: 'moulder', name: 'Moulder', cycleSec: 34, mtbfMin: 480, mttrMin: 15, faults: ['Mould clamp fault', 'Ejector pin stuck'] },
-      {
-        id: 'sealer',
-        name: 'Sealer',
-        cycleSec: 28,
-        mtbfMin: 360,
-        mttrMin: 25,
-        faults: ['Sealer jaw temperature high'],
-        partFault: { reason: 'Heater band failed', sku: 'HTR-BAND', chance: 0.25 },
-      },
-    ],
-  },
-]
-
-export const SHIFTS = { A: { startMin: 360 }, B: { startMin: 840 } } as const
-export const SHIFT_MIN = 480
 const MINUTE = 60_000
 const DAY = 86_400_000
-const FLUSH_EVERY_MIN = 10
-const DEFAULT_START = Date.UTC(2026, 9, 22) // used only when the store has no shift on record
-
-export type LineState = 'running' | 'down' | 'starved' | 'stopped'
-export type EventKind =
-  | 'shift_start'
-  | 'shift_end'
-  | 'fault'
-  | 'waiting_for_part'
-  | 'repair_started'
-  | 'repaired'
-  | 'starved'
-  | 'material_ok'
-  | 'stock_low'
-  | 'stock_received'
-  | 'line_stopped'
-  | 'line_started'
+const FLUSH_EVERY_MIN = 15
+const ORDER: ShiftId[] = ['A', 'B', 'C']
+const STOPPED: LineState[] = ['STOP_FAULT', 'STOP_OTHER', 'IDLE_STARVED']
+// Reasons that are equipment trips; the rest (jams, changes, no operator, holds, unclassified) are other stops.
+const isTrip = (reason: string) => /TRIP|FAULT|TEMP/.test(reason)
 
 export interface FactoryEvent {
   id: number
   sim_time: string
   line_id: string | null
-  station_id: string | null
-  kind: EventKind
+  kind: string
   message: string
 }
 
-export interface StationStatus {
-  station_id: string
-  name: string
-  state: 'running' | 'down' | 'idle'
-  fault: string | null
-  down_since: string | null
-  waiting_for_part: string | null
+export interface Alarm {
+  line_id: string | null
+  code: string
+  severity: 'warn' | 'trip' | 'info'
+  text: string
+  raised_at: string
 }
 
-export interface LineStatus {
+export interface LiveLine {
   line_id: string
+  name: string
+  product: string
   state: LineState
+  since: string
+  minutes_in_state: number
+  reason_code: string | null
+  rate_per_h: number
+  ideal_rate_per_h: number
   produced_units: number
-  scrap_units: number
+  reject_units: number
   target_units: number
   target_to_date: number
-  percent_of_target_to_date: number | null
-  pace: 'on_track' | 'at_risk' | 'behind' | null
+  pace_percent: number | null
+  status: Pace | null
   downtime_min: number
-  material: { sku: string; on_hand: number; per_unit: number }
-  stations: StationStatus[]
+  crew: number
+  open_alarms: Omit<Alarm, 'line_id'>[]
+  signals: { tag: string; value: number; unit: string; warn_limit: number; trip_limit: number }[]
 }
 
-export interface FactoryStatus {
-  sim_time: string
-  shift_date: string
-  shift: 'A' | 'B'
-  shift_elapsed_min: number
-  shift_length_min: number
-  lines: LineStatus[]
+export interface Snapshot {
+  synthetic: true
+  company: string
+  sim_clock: { sim_now: string; speed: number; held: boolean; mode: 'live' | 'time-lapse' | 'hold' | 'manual' }
+  shift: { date: string; shift: ShiftId; lead: string; headcount: number; planned_elapsed_min: number }
+  roll_up: Record<string, number>
+  lines: LiveLine[]
+  materials: { sku: string; name: string; on_hand: number; unit: string; reorder_point: number; status: 'ok' | 'reorder' | 'out_of_stock'; days_cover: number | null }[]
+  alarms_open: Alarm[]
+  events: FactoryEvent[]
 }
-
-interface Fault {
-  reason: string
-  since: number
-  repairAt: number | null
-  needsPart: string | null
-}
-
-interface StationRuntime {
-  spec: StationSpec
-  fault: Fault | null
-}
-
-interface LineRuntime {
-  spec: LineSpec
-  running: boolean
-  produced: number
-  scrap: number
-  unitAcc: number
-  scrapAcc: number
-  downtimeMin: number
-  starved: boolean
-  stations: StationRuntime[]
-}
-
-export type ActionResult = { ok: true; message: string } | { ok: false; message: string }
 
 export interface SimOptions {
+  /** Seed for the random model. Default: the story seed from plant.json. */
   seed?: number
-  /** 'random' (default): stations fail at random. 'off': only injected faults. */
+  /** Run the scripted story day when the store holds no shift after it. Default true. */
+  story?: boolean
+  /** 'random' (default) or 'off' (no random stops; scripted ones still happen). */
   faults?: 'random' | 'off'
 }
 
-/** Small seeded PRNG (mulberry32): the same seed gives the same run. */
+interface Stop {
+  reason: string
+  state: 'STOP_FAULT' | 'STOP_OTHER'
+  since: number
+  until: number | null
+}
+
+interface SignalRt {
+  spec: PlantSignal
+  value: number
+  ramp: { from: number; perMin: number; start: number } | null
+  /** After a trip the heater is off: a short overshoot, then the jaw cools towards baseline. */
+  trippedAt: { t: number; peak: number } | null
+}
+
+interface LineRt {
+  spec: PlantLine
+  rng: () => number
+  state: LineState
+  since: number
+  stop: Stop | null
+  runToStop: number
+  restartAt: number
+  good: number
+  reject: number
+  rejectCodes: Record<string, number>
+  downtimeMin: number
+  unitAcc: number
+  recent: number[]
+  signals: SignalRt[]
+  rejectRamp: { to: number; start: number; until: number; code: string } | null
+  starvedOn: string | null
+}
+
+// ---- small helpers ---------------------------------------------------------------------------------
+
+/** mulberry32: the same seed gives the same stream. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -170,108 +134,161 @@ function mulberry32(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
-
+/** One substream per (seed, line), so adding a line does not change the others. */
+const substream = (seed: number, key: string) => mulberry32([...key].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), (seed ^ 2166136261) >>> 0))
+const normal = (rng: () => number) => Math.sqrt(-2 * Math.log(1 - rng())) * Math.cos(2 * Math.PI * rng())
+const pick = (rng: () => number, mix: Record<string, number>) => {
+  const total = Object.values(mix).reduce((a, b) => a + b, 0)
+  let r = rng() * total
+  for (const [k, w] of Object.entries(mix)) if ((r -= w) < 0) return k
+  return Object.keys(mix).at(-1)!
+}
 const fmt = (t: number) => new Date(t).toISOString().slice(0, 16).replace('T', ' ')
 const dateOf = (t: number) => new Date(t).toISOString().slice(0, 10)
-const minuteOfDay = (t: number) => Math.floor((t % DAY) / MINUTE)
+const hhmm = (date: string, time: string) => Date.parse(`${date}T${time}:00.000Z`)
 const round1 = (n: number) => Math.round(n * 10) / 10
+const statusOf = (pace: number): Pace => (pace >= 95 ? 'on_track' : pace >= 80 ? 'at_risk' : 'behind')
+
+/** Planned (break-free) minutes elapsed after `elapsed` minutes of a shift. */
+export function plannedElapsed(elapsed: number): number {
+  let planned = Math.min(Math.max(elapsed, 0), PLANT.shift_min)
+  for (const b of PLANT.breaks) planned -= Math.max(0, Math.min(elapsed, b.after_min + b.min) - b.after_min)
+  return Math.max(0, planned)
+}
+const inBreak = (elapsed: number) => PLANT.breaks.find((b) => elapsed >= b.after_min && elapsed < b.after_min + b.min)
 
 export class FactorySim {
   private t = 0
-  private shift: 'A' | 'B' = 'A'
+  private shift: ShiftId = 'A'
   private shiftStart = 0
-  private readonly lines: LineRuntime[]
-  private readonly stock = new Map<string, { onHand: number; reorderPoint: number; dirty: boolean }>()
+  private readonly lines: LineRt[]
+  private readonly stock = new Map<string, { onHand: number; dirty: boolean; log: { t: number; used: number }[]; used: number }>()
   private readonly log: FactoryEvent[] = []
+  private readonly alarms: Alarm[] = []
   private nextEventId = 1
   private lastFlush = 0
+  private lastLog = 0
+  private pending = 0
   private queue: Promise<unknown> = Promise.resolve()
-  private readonly listeners = new Set<(change: { events: boolean }) => void>()
-  private newEvents = false
-  private readonly rng: () => number
+  private readonly listeners = new Set<() => void>()
   private readonly randomFaults: boolean
+  private story: Plant['story'] | null = null
+  private readonly doneBeats = new Set<number>()
   private timer: ReturnType<typeof setInterval> | undefined
+  private holdUntil = 0
+  private mode: Snapshot['sim_clock']['mode'] = 'manual'
+  private speed = 0
 
   private constructor(
     private readonly store: Store,
+    private readonly seed: number,
     options: SimOptions,
   ) {
-    this.rng = mulberry32(options.seed ?? 20261022)
     this.randomFaults = (options.faults ?? 'random') === 'random'
-    this.lines = LINE_SPECS.map((spec) => ({
-      spec,
-      running: true,
-      produced: 0,
-      scrap: 0,
-      unitAcc: 0,
-      scrapAcc: 0,
-      downtimeMin: 0,
-      starved: false,
-      stations: spec.stations.map((s) => ({ spec: s, fault: null })),
-    }))
+    this.lines = PLANT.lines.map((spec) => {
+      const rng = substream(seed, spec.id)
+      return {
+        spec,
+        rng,
+        state: 'OFF_SHIFT' as LineState,
+        since: 0,
+        stop: null,
+        runToStop: -Math.log(1 - rng()) * spec.mtbf_min,
+        restartAt: 0,
+        good: 0,
+        reject: 0,
+        rejectCodes: {},
+        downtimeMin: 0,
+        unitAcc: 0,
+        recent: [],
+        signals: (spec.signals ?? []).map((s) => ({ spec: s, value: s.baseline, ramp: null, trippedAt: null })),
+        rejectRamp: null,
+        starvedOn: null,
+      }
+    })
   }
 
-  /** Loads stock and the latest recorded shift from the store, then starts at the next shift. */
+  /**
+   * Loads stock from the store and picks the start. On a fresh plant store (latest shift on record before
+   * the story day) the story day runs: shift A from 06:00 is simulated at once up to the story start (12:55),
+   * then the clock goes live. Otherwise the simulation continues with the shift after the latest on record.
+   */
   static async create(store: Store, options: SimOptions = {}): Promise<FactorySim> {
-    const sim = new FactorySim(store, options)
-    const skus = new Set(LINE_SPECS.flatMap((l) => [l.material.sku, ...l.stations.flatMap((s) => (s.partFault ? [s.partFault.sku] : []))]))
-    for (const sku of skus) {
-      const row = (await store.findStock(sku)).find((r) => r.sku === sku)
-      if (!row) throw new Error(`simulation needs stock item ${sku}`)
-      sim.stock.set(sku, { onHand: row.on_hand, reorderPoint: row.reorder_point, dirty: false })
+    const sim = new FactorySim(store, options.seed ?? PLANT.story.seed, options)
+    for (const item of PLANT.stock) {
+      const row = (await store.findStock(item.sku)).find((r) => r.sku === item.sku)
+      if (!row) throw new Error(`the plant simulation needs stock item ${item.sku}; run with LINELEDGER_PLANT=1`)
+      sim.stock.set(item.sku, { onHand: row.on_hand, dirty: false, log: [], used: 0 })
+    }
+    for (const line of PLANT.lines) {
+      if (!(await store.lineExists(line.id))) throw new Error(`the plant simulation needs line ${line.id}; run with LINELEDGER_PLANT=1`)
     }
     const latest = await store.latestShift({})
-    if (!latest) sim.beginShift(DEFAULT_START + SHIFTS.A.startMin * MINUTE, 'A')
-    else {
-      const day = Date.parse(`${latest.shift_date}T00:00:00.000Z`)
-      if (latest.shift === 'A') sim.beginShift(day + SHIFTS.B.startMin * MINUTE, 'B')
-      else sim.beginShift(day + DAY + SHIFTS.A.startMin * MINUTE, 'A')
-    }
-    sim.lastFlush = sim.t
-    for (const line of sim.lines) {
-      const material = sim.stock.get(line.spec.material.sku)!
-      if (material.onHand <= material.reorderPoint) {
-        sim.record('stock_low', `${line.spec.material.sku} at ${Math.floor(material.onHand)}, at or below its reorder point`, line.spec.id)
-      }
+    const storyDay = Date.parse(`${PLANT.story.date}T00:00:00.000Z`)
+    const latestDay = latest ? Date.parse(`${latest.shift_date}T00:00:00.000Z`) : storyDay - DAY
+    if ((options.story ?? true) && latestDay < storyDay) {
+      sim.story = PLANT.story
+      sim.beginShift(storyDay + PLANT.shifts.A.start_min * MINUTE, 'A')
+      sim.lastLog = sim.t
+      sim.logUse()
+      await sim.run(hhmm(PLANT.story.date, PLANT.story.start) - sim.t, false) // shift A up to the story start
+      await sim.flush(true)
+    } else if (!latest) {
+      sim.beginShift(storyDay + PLANT.shifts.A.start_min * MINUTE, 'A')
+    } else {
+      const shift = latest.shift as ShiftId
+      const next = ORDER[(ORDER.indexOf(shift) + 1) % 3]!
+      const nextDay = shift === 'C' ? latestDay + DAY : latestDay
+      sim.beginShift(nextDay + PLANT.shifts[next].start_min * MINUTE, next)
+      await sim.flush(true)
     }
     return sim
   }
 
-  // ---- public API (every mutation goes through one queue, so ticks and tool calls never interleave) ----
+  // ---- reading ----------------------------------------------------------------------------------
 
-  status(): FactoryStatus {
-    const elapsed = (this.t - this.shiftStart) / MINUTE
+  /** The current shift and the live per-line counts, for overlaying the in-progress shift summary. */
+  liveShift() {
     return {
-      sim_time: fmt(this.t),
       shift_date: dateOf(this.shiftStart),
       shift: this.shift,
-      shift_elapsed_min: Math.floor(elapsed),
-      shift_length_min: SHIFT_MIN,
-      lines: this.lines.map((line) => {
-        const targetToDate = Math.round((line.spec.targetPerShift * elapsed) / SHIFT_MIN)
-        const percent = targetToDate > 0 ? round1((line.produced / targetToDate) * 100) : null
-        const material = this.stock.get(line.spec.material.sku)!
+      planned_elapsed_min: plannedElapsed((this.t - this.shiftStart) / MINUTE),
+      lines: new Map(this.lines.filter((l) => this.onShift(l)).map((l) => [l.spec.id, this.liveLine(l)])),
+    }
+  }
+
+  snapshot(): Snapshot {
+    const lines = this.lines.map((l) => this.liveLine(l))
+    const roll_up: Record<string, number> = {}
+    for (const l of lines) roll_up[l.state] = (roll_up[l.state] ?? 0) + 1
+    const onShift = this.lines.filter((l) => this.onShift(l))
+    return {
+      synthetic: true,
+      company: PLANT.company,
+      sim_clock: { sim_now: fmt(this.t), speed: this.speed, held: this.mode === 'hold', mode: this.mode },
+      shift: {
+        date: dateOf(this.shiftStart),
+        shift: this.shift,
+        lead: PLANT.shifts[this.shift].lead,
+        headcount: onShift.reduce((n, l) => n + (this.shift === 'C' ? (l.spec.crew_c ?? l.spec.crew) : l.spec.crew), 0) + PLANT.support_per_shift[this.shift],
+        planned_elapsed_min: Math.floor(plannedElapsed((this.t - this.shiftStart) / MINUTE)),
+      },
+      roll_up,
+      lines,
+      materials: PLANT.stock.map((s) => {
+        const onHand = Math.floor(this.stock.get(s.sku)!.onHand + 1e-9)
         return {
-          line_id: line.spec.id,
-          state: this.lineState(line),
-          produced_units: line.produced,
-          scrap_units: line.scrap,
-          target_units: line.spec.targetPerShift,
-          target_to_date: targetToDate,
-          percent_of_target_to_date: percent,
-          pace: percent === null ? null : percent >= 95 ? 'on_track' : percent >= 80 ? 'at_risk' : 'behind',
-          downtime_min: Math.round(line.downtimeMin),
-          material: { sku: line.spec.material.sku, on_hand: Math.floor(material.onHand), per_unit: line.spec.material.perUnit },
-          stations: line.stations.map((s) => ({
-            station_id: s.spec.id,
-            name: s.spec.name,
-            state: s.fault ? 'down' : this.lineState(line) === 'running' ? 'running' : 'idle',
-            fault: s.fault?.reason ?? null,
-            down_since: s.fault ? fmt(s.fault.since) : null,
-            waiting_for_part: s.fault?.needsPart ?? null,
-          })),
+          sku: s.sku,
+          name: s.name,
+          on_hand: onHand,
+          unit: s.unit,
+          reorder_point: s.reorder_point,
+          status: onHand === 0 ? 'out_of_stock' : onHand <= s.reorder_point ? 'reorder' : 'ok',
+          days_cover: this.daysCover(s.sku),
         }
       }),
+      alarms_open: [...this.alarms],
+      events: this.events({ limit: 8 }),
     }
   }
 
@@ -279,104 +296,92 @@ export class FactorySim {
     return this.log.filter((e) => line_id === undefined || e.line_id === line_id).slice(-limit).reverse()
   }
 
+  /** On hand divided by the use over the trailing 24 simulated hours (or what there is, from one hour). */
+  daysCover(sku: string): number | null {
+    const item = this.stock.get(sku)
+    if (!item) return null
+    const from = item.log.find((p) => p.t >= this.t - DAY)
+    if (!from || this.t - from.t < 60 * MINUTE) return null
+    const perDay = ((item.used - from.used) / (this.t - from.t)) * DAY
+    return perDay > 0 ? round1(item.onHand / perDay) : null
+  }
+
+  /** Live stock on hand for a simulated material, or undefined for other SKUs. */
+  onHand(sku: string): number | undefined {
+    const item = this.stock.get(sku)
+    return item ? Math.floor(item.onHand + 1e-9) : undefined
+  }
+
   lineIds(): string[] {
     return this.lines.map((l) => l.spec.id)
   }
 
-  stationIds(lineId: string): string[] {
-    return this.line(lineId)?.stations.map((s) => s.spec.id) ?? []
-  }
+  // ---- changing ---------------------------------------------------------------------------------
 
-  /** Advances simulated time by `ms`, writing finished shifts and stock levels to the store. */
+  /** Advances simulated time by `ms`, writing shift rows and stock levels to the store. */
   advance(ms: number): Promise<void> {
-    return this.enqueue(() => this.run(ms))
+    return this.enqueue(() => this.run(ms, true))
   }
 
-  injectFault(lineId: string, stationId: string, reason?: string): Promise<ActionResult> {
-    return this.enqueue(async () => {
-      const station = this.station(lineId, stationId)
-      if (!station) return { ok: false, message: this.unknownStation(lineId, stationId) }
-      if (station.fault) return { ok: false, message: `${lineId} ${station.spec.name} is already down: ${station.fault.reason}.` }
-      const why = reason?.trim() || station.spec.faults[0]!
-      this.fail(this.line(lineId)!, station, why)
-      return { ok: true, message: `Fault started on ${lineId} ${station.spec.name}: ${why}.` }
-    })
-  }
-
-  clearFault(lineId: string, stationId?: string): Promise<ActionResult> {
-    return this.enqueue(async () => {
-      const line = this.line(lineId)
-      if (!line) return { ok: false, message: `Unknown line "${lineId}".` }
-      const targets = stationId === undefined ? line.stations.filter((s) => s.fault) : [this.station(lineId, stationId)]
-      if (targets.some((s) => s === undefined)) return { ok: false, message: this.unknownStation(lineId, stationId!) }
-      const faulted = (targets as StationRuntime[]).filter((s) => s.fault)
-      if (faulted.length === 0) return { ok: false, message: `No open fault on ${lineId}${stationId ? ` ${stationId}` : ''}.` }
-      const cleared: string[] = []
-      const blocked: string[] = []
-      for (const s of faulted) {
-        const part = s.fault!.needsPart
-        if (part && !this.takePart(part)) {
-          blocked.push(`${s.spec.name} needs a spare ${part}, which is out of stock`)
-          continue
-        }
-        this.repair(line, s, 'Maintenance cleared the fault')
-        cleared.push(s.spec.name)
-      }
-      if (cleared.length === 0) return { ok: false, message: `${blocked.join('; ')}.` }
-      await this.flush(false)
-      return { ok: true, message: `Cleared ${lineId} ${cleared.join(', ')}.${blocked.length ? ` Still down: ${blocked.join('; ')}.` : ''}` }
-    })
-  }
-
-  setRunning(lineId: string, running: boolean): Promise<ActionResult> {
-    return this.enqueue(async () => {
-      const line = this.line(lineId)
-      if (!line) return { ok: false, message: `Unknown line "${lineId}".` }
-      if (line.running === running) return { ok: false, message: `${lineId} is already ${running ? 'running' : 'stopped'}.` }
-      line.running = running
-      this.record(running ? 'line_started' : 'line_stopped', `${lineId} ${running ? 'started' : 'stopped'} by the operator`, line.spec.id)
-      return { ok: true, message: `${lineId} ${running ? 'started' : 'stopped'}.` }
-    })
-  }
-
-  receiveStock(sku: string, quantity: number): Promise<ActionResult & { on_hand?: number }> {
+  /** Goods receipt (ERP): adds stock. A line waiting for that material starts again. */
+  receiveStock(sku: string, quantity: number): Promise<{ ok: true; on_hand: number; message: string } | { ok: false; message: string }> {
     return this.enqueue(async () => {
       const item = this.stock.get(sku)
       if (!item) {
-        // Not a simulated material: book it straight into the store.
         const row = (await this.store.findStock(sku)).find((r) => r.sku === sku)
-        if (!row) return { ok: false, message: `Unknown SKU "${sku}".` }
+        if (!row) return { ok: false as const, message: `Unknown SKU "${sku}".` }
         await this.store.setStockOnHand(sku, row.on_hand + quantity)
-        this.record('stock_received', `Received ${quantity} ${row.unit} of ${row.name} (${sku})`)
-        return { ok: true, message: `Received ${quantity} ${row.unit} of ${sku}.`, on_hand: row.on_hand + quantity }
+        this.record('stock_received', `Goods receipt: ${quantity} ${row.unit} of ${sku}`)
+        return { ok: true as const, on_hand: row.on_hand + quantity, message: `Received ${quantity} ${row.unit} of ${sku}.` }
       }
       item.onHand += quantity
       item.dirty = true
-      this.record('stock_received', `Received ${quantity} of ${sku}; on hand ${Math.floor(item.onHand)}`)
-      this.issueWaitingParts()
+      const unit = PLANT.stock.find((s) => s.sku === sku)!.unit
+      this.record('stock_received', `Goods receipt: ${quantity} ${unit} of ${sku}, on hand ${Math.floor(item.onHand)}`)
       await this.flush(false)
-      return { ok: true, message: `Received ${quantity} of ${sku}.`, on_hand: Math.floor(item.onHand) }
+      return { ok: true as const, on_hand: Math.floor(item.onHand + 1e-9), message: `Received ${quantity} ${unit} of ${sku}.` }
     })
   }
 
-  /** Writes pending stock levels to the store. */
   flushNow(): Promise<void> {
     return this.enqueue(() => this.flush(true))
   }
 
-  onChange(listener: (change: { events: boolean }) => void): () => void {
+  onChange(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  /** Real-time driver: every tickMs of wall time, advance speed x tickMs of plant time. */
-  start({ speed, tickMs = 1000 }: { speed: number; tickMs?: number }): void {
+  /**
+   * Real-time driver. `speed` simulated seconds per real second (the story's time-lapse segment overrides it).
+   * With holds on, the clock pauses for the story's hold beats so a presenter can speak.
+   */
+  start({ speed, tickMs = 500, holds = false }: { speed: number; tickMs?: number; holds?: boolean }): void {
     this.stop()
     let busy = false
     this.timer = setInterval(() => {
-      if (busy) return // the store is slow: skip a tick rather than queue them up
+      if (busy) return
+      if (Date.now() < this.holdUntil) {
+        if (this.mode !== 'hold') {
+          this.mode = 'hold'
+          this.emit()
+        }
+        return
+      }
       busy = true
-      this.advance(speed * tickMs)
+      const segment = this.story?.speed.find((s) => this.t >= hhmm(this.story!.date, s.from) && this.t < hhmm(this.story!.date, s.to))
+      this.speed = segment?.speed ?? speed
+      this.mode = segment ? 'time-lapse' : 'live'
+      let ms = this.speed * tickMs
+      const hold = holds ? this.story?.holds.map((h) => ({ ...h, t: hhmm(this.story!.date, h.at) })).find((h) => h.t > this.t && h.t <= this.t + ms) : undefined
+      if (hold) ms = hold.t - this.t
+      this.advance(ms)
+        .then(() => {
+          if (hold) {
+            this.holdUntil = Date.now() + hold.s * 1000
+            this.mode = 'hold'
+          }
+        })
         .catch((error: unknown) => console.error('simulation tick failed:', error instanceof Error ? error.message : error))
         .finally(() => {
           busy = false
@@ -390,7 +395,7 @@ export class FactorySim {
     this.timer = undefined
   }
 
-  // ---- internals ----
+  // ---- internals --------------------------------------------------------------------------------
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.queue.then(fn)
@@ -399,177 +404,290 @@ export class FactorySim {
   }
 
   private emit(): void {
-    const events = this.newEvents
-    this.newEvents = false
-    for (const listener of this.listeners) listener({ events })
+    for (const listener of this.listeners) listener()
   }
 
-  private line(id: string): LineRuntime | undefined {
-    return this.lines.find((l) => l.spec.id === id)
+  private onShift(line: LineRt): boolean {
+    const lines = PLANT.shifts[this.shift].lines
+    return lines === 'all' || lines.includes(line.spec.id)
   }
 
-  private station(lineId: string, stationId: string): StationRuntime | undefined {
-    return this.line(lineId)?.stations.find((s) => s.spec.id === stationId)
+  private target(line: LineRt): number {
+    return this.onShift(line) ? (line.spec.target[this.shift] ?? 0) : 0
   }
 
-  private unknownStation(lineId: string, stationId: string): string {
-    const line = this.line(lineId)
-    if (!line) return `Unknown line "${lineId}".`
-    return `Unknown station "${stationId}" on ${lineId}. Stations: ${line.stations.map((s) => s.spec.id).join(', ')}.`
+  private liveLine(l: LineRt): LiveLine {
+    const planned = plannedElapsed((this.t - this.shiftStart) / MINUTE)
+    const target = this.target(l)
+    const targetToDate = Math.round((target * planned) / PLANNED_MIN)
+    const pace = this.onShift(l) && planned >= 10 && targetToDate > 0 ? round1((l.good / targetToDate) * 100) : null
+    const minutes = Math.round((this.t - l.since) / MINUTE)
+    const status = pace === null ? null : STOPPED.includes(l.state) && minutes > 15 ? 'behind' : statusOf(pace)
+    return {
+      line_id: l.spec.id,
+      name: l.spec.name,
+      product: l.spec.product,
+      state: l.state,
+      since: fmt(l.since),
+      minutes_in_state: minutes,
+      reason_code: l.stop?.reason ?? (l.state === 'IDLE_STARVED' ? `NO_${l.starvedOn}` : l.state === 'PLANNED_STOP' ? 'BREAK' : null),
+      rate_per_h: l.recent.reduce((a, b) => a + b, 0) * (60 / Math.max(1, l.recent.length)),
+      ideal_rate_per_h: Math.round(3600 / l.spec.ideal_cycle_s),
+      produced_units: l.good,
+      reject_units: l.reject,
+      target_units: target,
+      target_to_date: targetToDate,
+      pace_percent: pace,
+      status,
+      downtime_min: Math.round(l.downtimeMin),
+      crew: this.onShift(l) ? (this.shift === 'C' ? (l.spec.crew_c ?? l.spec.crew) : l.spec.crew) : 0,
+      open_alarms: this.alarms.filter((a) => a.line_id === l.spec.id).map(({ line_id: _, ...a }) => a),
+      signals: l.signals.map((s) => ({ tag: s.spec.tag, value: round1(s.value), unit: s.spec.unit, warn_limit: s.spec.warn, trip_limit: s.spec.trip })),
+    }
   }
 
-  private lineState(line: LineRuntime): LineState {
-    if (!line.running) return 'stopped'
-    if (line.stations.some((s) => s.fault)) return 'down'
-    if (this.stock.get(line.spec.material.sku)!.onHand < line.spec.material.perUnit) return 'starved'
-    return 'running'
+  private record(kind: string, message: string, line_id: string | null = null): void {
+    this.log.push({ id: this.nextEventId++, sim_time: fmt(this.t), line_id, kind, message })
+    if (this.log.length > 300) this.log.shift()
   }
 
-  private record(kind: EventKind, message: string, line_id: string | null = null, station_id: string | null = null): void {
-    this.log.push({ id: this.nextEventId++, sim_time: fmt(this.t), line_id, station_id, kind, message })
-    if (this.log.length > 200) this.log.shift()
-    this.newEvents = true
+  private raise(line_id: string | null, code: string, severity: Alarm['severity'], text: string): void {
+    if (this.alarms.some((a) => a.code === code && a.line_id === line_id)) return
+    this.alarms.push({ line_id, code, severity, text, raised_at: fmt(this.t) })
+    this.record('alarm', `${line_id ? `${line_id} ` : ''}${severity.toUpperCase()} ${code}: ${text}`, line_id)
   }
 
-  private beginShift(start: number, shift: 'A' | 'B'): void {
+  private clear(line_id: string | null, code: string): void {
+    const i = this.alarms.findIndex((a) => a.code === code && a.line_id === line_id)
+    if (i === -1) return
+    this.alarms.splice(i, 1)
+    this.record('alarm_clear', `${line_id ? `${line_id} ` : ''}${code} cleared`, line_id)
+  }
+
+  private beginShift(start: number, shift: ShiftId): void {
     this.t = start
     this.shiftStart = start
     this.shift = shift
-    for (const line of this.lines) {
-      Object.assign(line, { produced: 0, scrap: 0, unitAcc: 0, scrapAcc: 0, downtimeMin: 0 })
+    for (const l of this.lines) {
+      Object.assign(l, { good: 0, reject: 0, rejectCodes: {}, downtimeMin: 0, unitAcc: 0, recent: [] })
+      if (this.onShift(l)) l.restartAt = start
+      const state: LineState = l.stop ? l.stop.state : this.onShift(l) ? 'RUN' : 'OFF_SHIFT'
+      if (state !== l.state) {
+        l.state = state
+        l.since = start
+      }
     }
-    this.record('shift_start', `Shift ${shift} started on ${dateOf(start)}`)
+    const crew = this.snapshotHeadcount()
+    this.record('shift_start', `Shift ${shift} started on ${dateOf(start)}: lead ${PLANT.shifts[shift].lead}, ${crew} people on shift`)
+  }
+
+  private snapshotHeadcount(): number {
+    return this.lines.filter((l) => this.onShift(l)).reduce((n, l) => n + (this.shift === 'C' ? (l.spec.crew_c ?? l.spec.crew) : l.spec.crew), 0) + PLANT.support_per_shift[this.shift]
   }
 
   private async endShift(): Promise<void> {
-    const shift_date = dateOf(this.shiftStart)
-    for (const line of this.lines) {
-      const row: ShiftOutputRow = {
-        line_id: line.spec.id,
-        shift_date,
-        shift: this.shift,
-        target_units: line.spec.targetPerShift,
-        produced_units: line.produced,
-        downtime_min: Math.round(line.downtimeMin),
-      }
-      await this.store.putShiftOutput(row)
-    }
-    const summary = this.lines.map((l) => `${l.spec.id} ${l.produced}/${l.spec.targetPerShift}`).join(', ')
-    this.record('shift_end', `Shift ${this.shift} on ${shift_date} ended: ${summary}`)
     await this.flush(true)
-    // Night: maintenance repairs what it can, then the next morning shift starts.
-    for (const line of this.lines) {
-      for (const s of line.stations) if (s.fault && !s.fault.needsPart) this.repair(line, s, 'Repaired during the break')
-    }
-    if (this.shift === 'A') this.beginShift(this.shiftStart + (SHIFTS.B.startMin - SHIFTS.A.startMin) * MINUTE, 'B')
-    else this.beginShift(this.shiftStart - SHIFTS.B.startMin * MINUTE + DAY + SHIFTS.A.startMin * MINUTE, 'A')
+    const date = dateOf(this.shiftStart)
+    const summary = this.lines.filter((l) => this.onShift(l)).map((l) => `${l.spec.id} ${l.good}/${this.target(l)}`).join(', ')
+    this.record('shift_end', `Shift ${this.shift} on ${date} ended: ${summary}`)
+    const next = ORDER[(ORDER.indexOf(this.shift) + 1) % 3]!
+    const day = Date.parse(`${date}T00:00:00.000Z`) + (this.shift === 'C' ? DAY : 0)
+    this.beginShift(day + PLANT.shifts[next].start_min * MINUTE, next)
+    await this.flush(true) // the new shift's rows exist from its first minute
   }
 
-  private async run(ms: number): Promise<void> {
-    const end = this.t + ms
-    while (this.t < end) {
-      const shiftEnd = this.shiftStart + SHIFT_MIN * MINUTE
-      const step = Math.min(MINUTE, end - this.t, shiftEnd - this.t)
-      this.step(step)
-      this.t += step
-      if (this.t >= shiftEnd) await this.endShift() // after shift B the clock jumps to the next morning
-      if (this.t - this.lastFlush >= FLUSH_EVERY_MIN * MINUTE) await this.flush(false)
+  /** Whole simulated minutes only, so a run is the same whatever the tick size; the remainder carries over. */
+  private async run(ms: number, flush: boolean): Promise<void> {
+    this.pending += ms
+    while (this.pending >= MINUTE) {
+      this.pending -= MINUTE
+      this.applyBeats()
+      this.step()
+      this.t += MINUTE
+      if (this.t - this.lastLog >= FLUSH_EVERY_MIN * MINUTE) this.logUse()
+      if (this.t >= this.shiftStart + PLANT.shift_min * MINUTE) await this.endShift()
+      else if (flush && this.t - this.lastFlush >= FLUSH_EVERY_MIN * MINUTE) await this.flush(false)
     }
   }
 
-  private step(ms: number): void {
-    const minutes = ms / MINUTE
-    for (const line of this.lines) {
-      for (const s of line.stations) {
-        if (s.fault?.repairAt !== null && s.fault?.repairAt !== undefined && s.fault.repairAt <= this.t) this.repair(line, s, 'Repaired')
+  private logUse(): void {
+    for (const item of this.stock.values()) {
+      item.log.push({ t: this.t, used: item.used })
+      if (item.log.length > 200) item.log.shift()
+    }
+    this.lastLog = this.t
+  }
+
+  private applyBeats(): void {
+    if (!this.story) return
+    const story = this.story
+    story.beats.forEach((beat, i) => {
+      if (this.doneBeats.has(i) || hhmm(story.date, beat.at) > this.t) return
+      this.doneBeats.add(i)
+      this.applyBeat(beat)
+    })
+  }
+
+  private applyBeat(beat: StoryBeat): void {
+    const line = this.lines.find((l) => l.spec.id === beat.line)
+    const signal = line?.signals.find((s) => s.spec.tag === beat.tag)
+    switch (beat.action) {
+      case 'sensor_ramp':
+        if (signal) signal.ramp = { from: Number(beat.from), perMin: Number(beat.per_min), start: this.t }
+        break
+      case 'reject_ramp':
+        if (line) line.rejectRamp = { to: Number(beat.to), start: this.t, until: hhmm(this.story!.date, String(beat.until)), code: String(beat.code) }
+        break
+      case 'quality_check':
+        this.record('quality_check', `${beat.message} (${beat.check}: ${beat.result})`, line?.spec.id ?? null)
+        break
+      case 'note':
+        this.record('note', String(beat.message), line?.spec.id ?? null)
+        break
+      case 'stop':
+        if (line && !line.stop) this.startStop(line, String(beat.reason), hhmm(this.story!.date, String(beat.until)))
+        break
+      case 'swap_part': {
+        const item = this.stock.get(String(beat.sku))
+        if (item) {
+          item.onHand = Math.max(0, item.onHand - Number(beat.qty))
+          item.dirty = true
+        }
+        this.record('part_swap', `${beat.message}: ${beat.qty} ${beat.sku} used, ${Math.floor(item?.onHand ?? 0)} left`, line?.spec.id ?? null)
+        break
       }
-      if (this.randomFaults && this.lineState(line) === 'running') {
-        for (const s of line.stations) {
-          if (this.rng() < 1 - Math.exp(-minutes / s.spec.mtbfMin)) {
-            const part = s.spec.partFault
-            const reason = part && this.rng() < part.chance ? part.reason : s.spec.faults[Math.floor(this.rng() * s.spec.faults.length)]!
-            this.fail(line, s, reason)
-            break
-          }
+      case 'sensor_reset':
+        if (signal && line) {
+          signal.ramp = null
+          signal.trippedAt = null
+          signal.value = signal.spec.baseline
+          this.clear(line.spec.id, signal.spec.warn_code)
+          this.clear(line.spec.id, signal.spec.trip_code)
+        }
+        break
+      case 'restart':
+        if (line?.stop) this.endStop(line)
+        break
+    }
+  }
+
+  private quiet(line: LineRt): boolean {
+    const window = this.story?.quiet[line.spec.id]
+    return window !== undefined && this.t >= hhmm(this.story!.date, window[0]) && this.t < hhmm(this.story!.date, window[1])
+  }
+
+  private startStop(line: LineRt, reason: string, until: number | null): void {
+    line.stop = { reason, state: isTrip(reason) ? 'STOP_FAULT' : 'STOP_OTHER', since: this.t, until }
+    this.record('stop', `${line.spec.id} stopped: ${reason}`, line.spec.id)
+  }
+
+  private endStop(line: LineRt): void {
+    const minutes = Math.round((this.t - line.stop!.since) / MINUTE)
+    this.record('restart', `${line.spec.id} running again after ${minutes} min (${line.stop!.reason})`, line.spec.id)
+    line.stop = null
+    line.restartAt = this.t
+    line.runToStop = -Math.log(1 - line.rng()) * line.spec.mtbf_min
+  }
+
+  private step(): void {
+    const minutes = 1
+    const elapsed = (this.t - this.shiftStart) / MINUTE
+    const brk = inBreak(elapsed)
+    for (const l of this.lines) {
+      const onShift = this.onShift(l)
+      if (l.stop?.until !== null && l.stop?.until !== undefined && this.t >= l.stop.until) this.endStop(l)
+
+      // sensors: baseline with noise, or a scripted ramp; warn and trip limits raise alarms
+      for (const s of l.signals) {
+        if (s.trippedAt) {
+          const m = (this.t - s.trippedAt.t) / MINUTE
+          s.value = m <= 4 ? s.trippedAt.peak + 0.5 * m : Math.max(s.spec.baseline, s.trippedAt.peak + 2 - 1.2 * (m - 4))
+          continue
+        }
+        s.value = s.ramp ? s.ramp.from + (s.ramp.perMin * (this.t - s.ramp.start)) / MINUTE : s.spec.baseline + s.spec.noise * normal(l.rng)
+        if (s.value >= s.spec.warn) this.raise(l.spec.id, s.spec.warn_code, 'warn', `${s.spec.tag} ${round1(s.value)} ${s.spec.unit}, warn limit ${s.spec.warn}`)
+        if (s.value >= s.spec.trip) {
+          this.raise(l.spec.id, s.spec.trip_code, 'trip', `${s.spec.tag} ${round1(s.value)} ${s.spec.unit}, trip limit ${s.spec.trip}`)
+          if (!l.stop) this.startStop(l, s.spec.trip_reason, s.ramp ? null : this.t + this.repairMinutes(l) * MINUTE)
+          s.trippedAt = { t: this.t, peak: s.value }
+          s.ramp = null
+          l.rejectRamp = null
         }
       }
-      const state = this.lineState(line)
-      if (state === 'running') this.produce(line, ms)
-      else if (state === 'down' || state === 'starved') line.downtimeMin += minutes
-      const starvedNow = this.lineState(line) === 'starved'
-      if (starvedNow && !line.starved) this.record('starved', `${line.spec.id} stopped: out of ${line.spec.material.sku}`, line.spec.id)
-      if (!starvedNow && line.starved) this.record('material_ok', `${line.spec.id} has ${line.spec.material.sku} again`, line.spec.id)
-      line.starved = starvedNow
-    }
-  }
 
-  private produce(line: LineRuntime, ms: number): void {
-    const bottleneck = Math.max(...line.spec.stations.map((s) => s.cycleSec))
-    line.unitAcc += (ms / 1000 / bottleneck) * (0.97 + 0.03 * this.rng())
-    let units = Math.floor(line.unitAcc)
-    const material = this.stock.get(line.spec.material.sku)!
-    units = Math.min(units, Math.floor(material.onHand / line.spec.material.perUnit + 1e-9))
-    if (units <= 0) return
-    line.unitAcc -= units
-    const before = material.onHand
-    material.onHand = Math.max(0, material.onHand - units * line.spec.material.perUnit)
-    material.dirty = true
-    line.scrapAcc += units * line.spec.scrapRate
-    const scrap = Math.floor(line.scrapAcc)
-    line.scrapAcc -= scrap
-    line.scrap += scrap
-    line.produced += units - scrap
-    if (before > material.reorderPoint && material.onHand <= material.reorderPoint) {
-      this.record('stock_low', `${line.spec.material.sku} at ${Math.floor(material.onHand)}, at or below its reorder point`, line.spec.id)
-    }
-  }
+      // random stops count down run time only
+      const runnable = onShift && !brk && !l.stop
+      if (runnable && this.randomFaults && !this.quiet(l)) {
+        l.runToStop -= minutes
+        if (l.runToStop <= 0) this.startStop(l, pick(l.rng, l.spec.downtime_reasons), this.t + this.repairMinutes(l) * MINUTE)
+      }
 
-  private fail(line: LineRuntime, station: StationRuntime, reason: string): void {
-    const part = station.spec.partFault?.reason === reason ? station.spec.partFault.sku : null
-    station.fault = { reason, since: this.t, repairAt: null, needsPart: part }
-    this.record('fault', `${line.spec.id} ${station.spec.name} down: ${reason}`, line.spec.id, station.spec.id)
-    if (part && this.takePart(part)) {
-      station.fault.needsPart = null
-      station.fault.repairAt = this.t + this.repairTime(station)
-      this.record('repair_started', `Spare ${part} issued for ${line.spec.id} ${station.spec.name}`, line.spec.id, station.spec.id)
-    } else if (part) {
-      this.record('waiting_for_part', `${line.spec.id} ${station.spec.name} waits for a spare ${part} (out of stock)`, line.spec.id, station.spec.id)
-    } else {
-      station.fault.repairAt = this.t + this.repairTime(station)
-    }
-  }
+      const short = Object.entries(l.spec.bom).find(([sku, qty]) => this.stock.get(sku)!.onHand < qty)
+      const state: LineState = !onShift ? (l.stop ? l.stop.state : 'OFF_SHIFT') : l.stop ? l.stop.state : brk ? 'PLANNED_STOP' : short ? 'IDLE_STARVED' : 'RUN'
+      if (state !== l.state) {
+        if (state === 'IDLE_STARVED') this.record('starved', `${l.spec.id} waiting for material: ${short![0]} is out`, l.spec.id)
+        if (l.state === 'IDLE_STARVED' && state !== 'IDLE_STARVED') this.record('material_ok', `${l.spec.id} has ${l.starvedOn} again`, l.spec.id)
+        if (l.state === 'PLANNED_STOP' && state === 'RUN') l.restartAt = this.t
+        l.state = state
+        l.since = this.t
+      }
+      l.starvedOn = short?.[0] ?? null
 
-  private repair(line: LineRuntime, station: StationRuntime, how: string): void {
-    const minutes = Math.round((this.t - station.fault!.since) / MINUTE)
-    this.record('repaired', `${how}: ${line.spec.id} ${station.spec.name} back up after ${minutes} min`, line.spec.id, station.spec.id)
-    station.fault = null
-  }
-
-  private repairTime(station: StationRuntime): number {
-    return Math.round(station.spec.mttrMin * (0.7 + 0.6 * this.rng())) * MINUTE
-  }
-
-  private takePart(sku: string): boolean {
-    const item = this.stock.get(sku)
-    if (!item || item.onHand < 1) return false
-    item.onHand -= 1
-    item.dirty = true
-    return true
-  }
-
-  private issueWaitingParts(): void {
-    for (const line of this.lines) {
-      for (const s of line.stations) {
-        if (s.fault?.needsPart && this.takePart(s.fault.needsPart)) {
-          this.record('repair_started', `Spare ${s.fault.needsPart} issued for ${line.spec.id} ${s.spec.name}`, line.spec.id, s.spec.id)
-          s.fault.needsPart = null
-          s.fault.repairAt = this.t + this.repairTime(s)
-        }
+      let goodNow = 0
+      if (state === 'RUN') goodNow = this.produce(l, minutes)
+      else if (onShift && STOPPED.includes(state)) l.downtimeMin += minutes
+      if (onShift) {
+        l.recent.push(goodNow)
+        if (l.recent.length > 15) l.recent.shift()
       }
     }
+  }
+
+  private repairMinutes(l: LineRt): number {
+    return Math.max(2, Math.round(l.spec.mttr_median_min * Math.exp(0.6 * normal(l.rng))))
+  }
+
+  private produce(l: LineRt, minutes: number): number {
+    const sinceRestart = (this.t - l.restartAt) / MINUTE
+    const [m, tau] = l.spec.warmup
+    const warm = 1 + (m - 1) * Math.exp(-sinceRestart / tau)
+    const micro = 1 + (l.spec.micro_stops_per_h * 22) / 3600 // short stops under 2 min are not downtime; they slow the cycle
+    const cycle = l.spec.ideal_cycle_s * l.spec.slowdown * Math.exp(0.05 * normal(l.rng)) * warm * micro
+    l.unitAcc += (minutes * 60) / cycle
+    let units = Math.floor(l.unitAcc)
+    for (const [sku, qty] of Object.entries(l.spec.bom)) units = Math.min(units, Math.floor(this.stock.get(sku)!.onHand / qty + 1e-9))
+    if (units <= 0) return 0
+    l.unitAcc -= units
+    const ramp = l.rejectRamp
+    const base = l.spec.reject_rate
+    const p = ramp ? base + (ramp.to - base) * Math.min(1, (this.t - ramp.start) / Math.max(MINUTE, ramp.until - ramp.start)) : base
+    let rejects = 0
+    for (let i = 0; i < units; i++) {
+      if (l.rng() >= p) continue
+      rejects++
+      const code = ramp && l.rng() < (p - base) / p ? ramp.code : pick(l.rng, l.spec.reject_codes)
+      l.rejectCodes[code] = (l.rejectCodes[code] ?? 0) + 1
+    }
+    l.good += units - rejects
+    l.reject += rejects
+    for (const [sku, qty] of Object.entries(l.spec.bom)) {
+      const item = this.stock.get(sku)!
+      const before = item.onHand
+      item.onHand = Math.max(0, item.onHand - units * qty)
+      item.used += units * qty
+      item.dirty = true
+      const point = PLANT.stock.find((s) => s.sku === sku)!.reorder_point
+      if (before > point && item.onHand <= point) this.raise(null, `LOW-${sku}`, 'info', `${sku} at ${Math.floor(item.onHand)}, at or below its reorder point ${point}`)
+    }
+    return units - rejects
   }
 
   private async flush(force: boolean): Promise<void> {
+    const date = dateOf(this.shiftStart)
+    for (const l of this.lines) {
+      if (!this.onShift(l)) continue
+      await this.store.putShiftOutput({ line_id: l.spec.id, shift_date: date, shift: this.shift, target_units: this.target(l), produced_units: l.good, downtime_min: Math.round(l.downtimeMin) })
+    }
     for (const [sku, item] of this.stock) {
       if (!item.dirty && !force) continue
       await this.store.setStockOnHand(sku, Math.floor(item.onHand + 1e-9))
@@ -578,3 +696,5 @@ export class FactorySim {
     this.lastFlush = this.t
   }
 }
+
+type Plant = typeof PLANT

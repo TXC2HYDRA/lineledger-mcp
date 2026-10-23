@@ -77,6 +77,10 @@ export interface Store {
   /** Insert or replace one shift result (the simulation writes one per line at each shift end). */
   putShiftOutput(row: ShiftOutputRow): Promise<void>
   setStockOnHand(sku: string, onHand: number): Promise<void>
+  /** Insert a line if it does not exist yet (plant profile). */
+  addLine(line: LineRow): Promise<void>
+  /** Insert or replace a stock item (plant profile). */
+  putStockItem(item: StockRow): Promise<void>
   close(): Promise<void>
 }
 

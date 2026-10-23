@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp, type AppOptions } from '../server/app.js'
+import { applyPlantSeed } from '../server/plant.js'
 import { FactorySim } from '../server/sim.js'
 import type { Store } from '../server/store.js'
 import { TraceTap } from '../server/trace.js'
@@ -14,15 +15,20 @@ const ORIGIN = 'http://localhost:5173'
 let http: Server
 let app: ReturnType<typeof createApp>
 let store: Store
-let sim: FactorySim
+let sim: FactorySim | undefined
 let trace: TraceTap
 let url: string
 const clients: Client[] = []
 
-// The simulation runs without its timer here (faults off); tests advance it explicitly.
-async function start(database: Store, options: Partial<AppOptions> = {}) {
+// Seed profile by default (two lines, no simulation). { plant: true } adds the Tarnby Works plant and its
+// simulation, without its timer: tests advance it explicitly.
+async function start(database: Store, options: Partial<AppOptions> & { plant?: boolean } = {}) {
   trace = new TraceTap()
-  sim = await FactorySim.create(database, { faults: 'off' })
+  sim = undefined
+  if (options.plant) {
+    await applyPlantSeed(database)
+    sim = await FactorySim.create(database)
+  }
   app = createApp({ store: database, sim, trace, allowedOrigins: [ORIGIN], notifyEveryMs: 50, ...options })
   http = await new Promise<Server>((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s))
@@ -74,29 +80,21 @@ describe('protocol', () => {
       'create_handover_note',
       'get_shift_history',
       'get_shift_summary',
-      'clear_fault',
-      'get_factory_events',
-      'get_line_status',
-      'inject_fault',
       'list_follow_ups',
       'list_handover_notes',
       'plan_container_load',
-      'receive_stock',
-      'set_line_running',
-    ].sort())
+    ])
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined()
   })
 
   it('reports which store is in use on /api/health', async () => {
-    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: true })
+    expect(await (await fetch(`${url}/api/health`)).json()).toEqual({ ok: true, name: 'lineledger', synthetic: true, store: h.name, mcp: 'stateful', simulation: false })
   })
 
-  it('lists the factory resources', async () => {
+  it('offers no resources in the seed profile', async () => {
     const { client } = await connect()
-    const { resources } = await client.listResources()
-    expect(resources.map((r) => r.uri).sort()).toEqual(['factory://events', 'factory://status'])
-    const read = await client.readResource({ uri: 'factory://status' })
-    expect(JSON.parse((read.contents[0] as { text: string }).text)).toMatchObject({ shift_date: '2026-10-22', shift: 'A' })
+    expect(client.getServerCapabilities()?.resources).toBeUndefined()
+    await expect(client.listResources()).rejects.toThrow(/Method not found/)
   })
 })
 
@@ -162,39 +160,40 @@ describe('stateful sessions', () => {
     expect(app.sessions.size).toBe(0) // idle for longer than 300 ms
   })
 
-  it('pushes resource updates to subscribed sessions only', async () => {
+  it('pushes plant snapshot updates to subscribed sessions only', async () => {
+    await stop()
+    await start(store, { plant: true })
     const watcher = await connect()
     const other = await connect()
     const seen: string[] = []
     const otherSeen: string[] = []
     watcher.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void seen.push(n.params.uri))
     other.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => void otherSeen.push(n.params.uri))
-    await watcher.client.subscribeResource({ uri: 'factory://status' })
-    await watcher.client.subscribeResource({ uri: 'factory://events' })
-    await expect(watcher.client.subscribeResource({ uri: 'factory://nothing' })).rejects.toThrow(/Unknown resource/)
+    await watcher.client.subscribeResource({ uri: 'plant://snapshot' })
+    await expect(watcher.client.subscribeResource({ uri: 'plant://nothing' })).rejects.toThrow(/Unknown resource/)
     await new Promise((r) => setTimeout(r, 200)) // the GET event stream opens after initialize
-    await call(other.client, 'inject_fault', { line_id: 'L1', station_id: 'press' })
-    await expect.poll(() => seen.sort(), { timeout: 3000 }).toEqual(['factory://events', 'factory://status'])
+    await sim!.advance(60_000)
+    await expect.poll(() => seen, { timeout: 3000 }).toEqual(['plant://snapshot'])
     expect(otherSeen).toEqual([])
-    const status = JSON.parse(((await watcher.client.readResource({ uri: 'factory://status' })).contents[0] as { text: string }).text)
-    expect(status.lines[0]).toMatchObject({ line_id: 'L1', state: 'down' })
+    const snapshot = JSON.parse(((await watcher.client.readResource({ uri: 'plant://snapshot' })).contents[0] as { text: string }).text)
+    expect(snapshot).toMatchObject({ synthetic: true, company: 'Tarnby Works', sim_clock: { sim_now: '2026-10-22 12:56' } })
     // the push went out on the session's GET stream and shows in the trace
     const { entries } = (await (await fetch(`${url}/api/trace`)).json()) as { entries: { dir: string; message: any }[] }
     expect(entries.some((e) => e.dir === 'out' && e.message.method === 'notifications/resources/updated')).toBe(true)
-    await watcher.client.unsubscribeResource({ uri: 'factory://status' })
+    await watcher.client.unsubscribeResource({ uri: 'plant://snapshot' })
     seen.length = 0
-    await call(other.client, 'clear_fault', { line_id: 'L1' })
+    await sim!.advance(60_000)
     await new Promise((r) => setTimeout(r, 300))
-    expect(seen).toEqual(['factory://events'])
+    expect(seen).toEqual([])
   })
 
   it('still serves every tool in the optional stateless mode', async () => {
     await stop()
-    await start(store, { mode: 'stateless' })
+    await start(store, { mode: 'stateless', plant: true })
     const { client, transport } = await connect()
     expect(transport.sessionId).toBeUndefined()
-    expect((await client.listTools()).tools).toHaveLength(15)
-    expect((await call(client, 'get_line_status', { line_id: 'L2' })).structuredContent!.lines).toHaveLength(1)
+    expect((await client.listTools()).tools).toHaveLength(12)
+    expect((await call(client, 'get_live_line_status', { line_id: 'L2' })).structuredContent!.lines).toHaveLength(1)
     for (const method of ['GET', 'DELETE']) {
       const res = await fetch(`${url}/mcp`, { method })
       expect(res.status).toBe(405)
@@ -203,61 +202,81 @@ describe('stateful sessions', () => {
   })
 })
 
-describe('simulation tools', () => {
-  it('reports live line status and follows faults, repairs, stops and stock receipts', async () => {
-    const { client } = await connect()
-    const status = (await call(client, 'get_line_status')).structuredContent!
-    expect(status).toMatchObject({ shift_date: '2026-10-22', shift: 'A', shift_elapsed_min: 0 })
-    expect(status.lines.map((l: { state: string }) => l.state)).toEqual(['running', 'running'])
-    await sim.advance(60 * 60_000)
-    const l1 = (await call(client, 'get_line_status', { line_id: 'L1' })).structuredContent!.lines[0]
-    expect(l1.produced_units).toBeGreaterThan(140)
-    expect(l1.pace).toBe('on_track')
-
-    const fault = await call(client, 'inject_fault', { line_id: 'L2', station_id: 'sealer', reason: 'Heater band failed' })
-    expect(fault.structuredContent!.line).toMatchObject({ state: 'down' })
-    const sealer = fault.structuredContent!.line.stations.find((s: { station_id: string }) => s.station_id === 'sealer')
-    expect(sealer).toMatchObject({ state: 'down', fault: 'Heater band failed', waiting_for_part: 'HTR-BAND' })
-    const blocked = await call(client, 'clear_fault', { line_id: 'L2' })
-    expect(blocked.isError).toBe(true)
-    expect(blocked.content[0]!.text).toMatch(/HTR-BAND/)
-    const received = await call(client, 'receive_stock', { sku: 'htr-band', quantity: 2 })
-    expect(received.structuredContent).toMatchObject({ sku: 'HTR-BAND', on_hand: 1 }) // one went straight into the repair
-    expect((await call(client, 'check_stock', { query: 'HTR-BAND' })).structuredContent!.items[0]).toMatchObject({ on_hand: 1, status: 'reorder' })
-    expect((await call(client, 'clear_fault', { line_id: 'L2', station_id: 'sealer' })).structuredContent!.line.state).toBe('running')
-
-    expect((await call(client, 'set_line_running', { line_id: 'L1', running: false })).structuredContent!.line.state).toBe('stopped')
-    expect((await call(client, 'set_line_running', { line_id: 'L1', running: false })).isError).toBe(true)
-    expect((await call(client, 'set_line_running', { line_id: 'L1', running: true })).structuredContent!.line.state).toBe('running')
-
-    const events = (await call(client, 'get_factory_events', { limit: 50 })).structuredContent!.events as { id: number; kind: string }[]
-    expect(events[0]!.id).toBeGreaterThan(events.at(-1)!.id) // newest first
-    expect(events.map((e) => e.kind)).toEqual(expect.arrayContaining(['fault', 'waiting_for_part', 'stock_received', 'repair_started', 'repaired', 'line_stopped', 'line_started']))
-    const onlyL1 = (await call(client, 'get_factory_events', { line_id: 'L1' })).structuredContent!.events as { line_id: string }[]
-    expect(onlyL1.every((e) => e.line_id === 'L1')).toBe(true)
+describe('plant profile (Tarnby Works simulation)', () => {
+  beforeEach(async () => {
+    await stop()
+    await start(store, { plant: true })
   })
 
-  it('rejects unknown lines, stations and SKUs with a useful message', async () => {
+  it('adds the live tools and the snapshot resource, and no tool that controls a line', async () => {
     const { client } = await connect()
-    const text = (r: Awaited<ReturnType<typeof call>>) => r.content[0]!.text
-    expect(text(await call(client, 'inject_fault', { line_id: 'L1', station_id: 'sealer' }))).toMatch(/Stations: slitter, press, packer/)
-    expect((await call(client, 'get_line_status', { line_id: 'L9' })).isError).toBe(true)
-    expect(text(await call(client, 'clear_fault', { line_id: 'L1' }))).toMatch(/No open fault/)
-    expect(text(await call(client, 'receive_stock', { sku: 'NOPE', quantity: 1 }))).toMatch(/Unknown SKU/)
-    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 0 })).isError).toBe(true)
-    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 4 })).structuredContent!.on_hand).toBe(40)
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).toHaveLength(12)
+    expect(names).toEqual(expect.arrayContaining(['get_live_line_status', 'get_factory_events', 'receive_stock']))
+    for (const control of ['inject_fault', 'clear_fault', 'set_line_running']) expect(names).not.toContain(control)
+    expect((await client.listResources()).resources.map((r) => r.uri)).toEqual(['plant://snapshot'])
+    expect(await (await fetch(`${url}/api/health`)).json()).toMatchObject({ simulation: true })
   })
 
-  it('a finished simulated shift shows up in the shift summary and history', async () => {
+  it('answers the live questions through the story: running, why down, how long, sealer temperature', async () => {
     const { client } = await connect()
-    await sim.advance(8 * 60 * 60_000)
+    const live = async (args: Record<string, unknown> = {}) => (await call(client, 'get_live_line_status', args)).structuredContent!
+    const now = await live()
+    expect(now).toMatchObject({ sim_now: '2026-10-22 12:55', shift: { date: '2026-10-22', shift: 'A', lead: 'Asha' } })
+    expect(now.lines).toHaveLength(7)
+    expect(now.roll_up.RUN).toBeGreaterThanOrEqual(6)
+    let l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2).toMatchObject({ line_id: 'L2', state: 'RUN', crew: 4 })
+    expect(l2.signals[0]).toMatchObject({ tag: 'M3.sealer_jaw_temp_c', unit: '°C', warn_limit: 190, trip_limit: 200 })
+
+    await sim!.advance(20 * 60_000) // 13:15: the jaw is over its warn limit, the line still runs
+    l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2.state).toBe('RUN')
+    expect(l2.signals[0].value).toBeGreaterThanOrEqual(190)
+    expect(l2.open_alarms.map((a: { code: string }) => a.code)).toEqual(['M3-TEMP-HI'])
+
+    await sim!.advance(12 * 60_000) // 13:27: tripped at 13:23
+    l2 = (await live({ line_id: 'L2' })).lines[0]
+    expect(l2).toMatchObject({ state: 'STOP_FAULT', reason_code: 'SEALER_FAULT', since: '2026-10-22 13:23', minutes_in_state: 4 })
+    expect(l2.open_alarms.map((a: { code: string }) => a.code)).toEqual(['M3-TEMP-HI', 'M3-HEAT-OVR'])
+    expect(l2.signals[0].value).toBeGreaterThan(200)
+    const events = (await call(client, 'get_factory_events', { line_id: 'L2', limit: 50 })).structuredContent!.events as { kind: string; message: string }[]
+    expect(events.map((e) => e.kind)).toEqual(expect.arrayContaining(['stop', 'alarm', 'quality_check']))
+    expect(events.find((e) => e.kind === 'quality_check')!.message).toMatch(/seal peel/)
+  })
+
+  it('shift summary of the shift in progress carries pace, and the finished shift is stored', async () => {
+    const { client } = await connect()
     const summary = (await call(client, 'get_shift_summary')).structuredContent!
-    expect(summary).toMatchObject({ shift_date: '2026-10-22', shift: 'A' })
-    expect(summary.lines[0].produced_units).toBeGreaterThan(1100)
-    expect(summary.lines[1].status).toBe('behind') // Line 2 ran out of HDPE
-    const history = (await call(client, 'get_shift_history', { limit: 2 })).structuredContent!.shifts
-    expect(history.map((s: { shift_date: string; shift: string }) => `${s.shift_date} ${s.shift}`)).toEqual(['2026-10-21 B', '2026-10-22 A'])
-    expect((await call(client, 'get_line_status')).structuredContent).toMatchObject({ shift: 'B', shift_elapsed_min: 0 })
+    expect(summary).toMatchObject({ shift_date: '2026-10-22', shift: 'A', in_progress: true })
+    expect(summary.lines).toHaveLength(7)
+    const l1 = summary.lines[0]
+    expect(l1.in_progress).toBe(true)
+    expect(l1.target_to_date).toBeLessThan(l1.target_units)
+    expect(l1.percent_of_pace).toBeGreaterThan(l1.percent_of_target)
+    await sim!.advance(66 * 60_000) // to 14:01: shift A has ended, B is in progress
+    const a = (await call(client, 'get_shift_summary', { shift_date: '2026-10-22', shift: 'A' })).structuredContent!
+    expect(a.in_progress).toBe(false)
+    expect(a.lines.find((l: { line_id: string }) => l.line_id === 'L2')).toMatchObject({ produced_units: 678, status: 'at_risk' })
+    expect((await call(client, 'get_shift_summary')).structuredContent).toMatchObject({ shift: 'B', in_progress: true })
+    const history = (await call(client, 'get_shift_history', { limit: 3 })).structuredContent!.shifts
+    expect(history.map((s: { shift: string; in_progress: boolean }) => `${s.shift} ${s.in_progress}`)).toEqual(['B false', 'A false', 'B true'])
+  })
+
+  it('stock shows live levels and days of cover; a goods receipt adds to it', async () => {
+    const { client } = await connect()
+    const band = (await call(client, 'check_stock', { query: 'heater band' })).structuredContent!.items[0]
+    expect(band).toMatchObject({ sku: 'HTR-BAND', on_hand: 3, status: 'ok' })
+    await sim!.advance(64 * 60_000) // 13:59: the band was swapped at 13:58
+    expect((await call(client, 'check_stock', { query: 'heater band' })).structuredContent!.items[0]).toMatchObject({ on_hand: 2, status: 'reorder', suggested_order_qty: 6 })
+    const hdpe = (await call(client, 'check_stock', { query: 'hdpe' })).structuredContent!.items[0]
+    expect(hdpe.days_cover).toBeGreaterThan(1)
+    expect(hdpe.on_hand).toBeLessThan(20400)
+    const r = await call(client, 'receive_stock', { sku: 'htr-band', quantity: 6 })
+    expect(r.structuredContent).toMatchObject({ sku: 'HTR-BAND', on_hand: 8 })
+    expect((await call(client, 'check_stock', { query: 'HTR' })).structuredContent!.items[0]).toMatchObject({ on_hand: 8, status: 'ok' })
+    expect((await call(client, 'receive_stock', { sku: 'NOPE', quantity: 1 })).content[0]!.text).toMatch(/Unknown SKU/)
+    expect((await call(client, 'receive_stock', { sku: 'LBL-ROLL', quantity: 0 })).isError).toBe(true)
   })
 })
 
