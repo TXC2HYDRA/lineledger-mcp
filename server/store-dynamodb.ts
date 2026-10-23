@@ -421,7 +421,8 @@ export async function openDynamoDbStore(env: NodeJS.ProcessEnv = process.env): P
   const { client, table, target } = dynamoClientFromEnv(env)
   const store = new DynamoDbStore({ client, table })
   try {
-    if (env.LINELEDGER_PLANT !== '1') await store.ensureSeeded() // the plant profile has no hand-written demo rows
+    if (env.LINELEDGER_PLANT === '1') await store.getSimState() // no hand-written demo rows in the plant profile; this only checks the table
+    else await store.ensureSeeded()
   } catch (error) {
     await store.close()
     const why = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
