@@ -64,6 +64,7 @@
         <button type="button" id="sidebar-toggle" class="icon-btn" aria-controls="sidebar" aria-expanded="true" aria-label="Close sidebar" title="Close or open the sidebar"><svg class="ico" aria-hidden="true"><use href="#i-sidebar" /></svg></button>
         <p class="crumb"><span class="muted">Dashboard</span> / <span id="crumb-view">Home</span></p>
         <p class="chip" id="synthetic-chip"><span class="badge">SYNTHETIC DEMO DATA</span> <span class="chip-dot" id="chip-dot" data-state="connecting" aria-hidden="true">●</span></p>
+        <p class="sim-chip" id="sim-chip" hidden title="Simulated plant clock: simulated seconds per real second"></p>
         <form id="composer" class="composer" autocomplete="off">
           <label for="text" class="sr-only">Type a request</label>
           <input id="text" name="text" type="text" placeholder="Type a request (press /)" maxlength="400" />
@@ -83,7 +84,7 @@
           <p class="hero-row"><span class="hero-metric" id="hero-metric">--</span> <span class="delta" id="hero-status" data-status="none"></span></p>
           <p class="muted" id="hero-meta"></p>
           <div class="actions" role="group" aria-label="Quick requests">
-            <button type="button" class="primary" data-say="line status"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>Line status</button>
+            <button type="button" class="primary" data-say="how are the lines doing right now"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>Lines right now</button>
             <button type="button" data-say="shift summary"><svg class="ico" aria-hidden="true"><use href="#i-pulse" /></svg>Shift summary</button>
             <button type="button" data-say="open follow-ups"><svg class="ico" aria-hidden="true"><use href="#i-list" /></svg>Open follow-ups</button>
             <button type="button" data-say="stock of hdpe"><svg class="ico" aria-hidden="true"><use href="#i-box" /></svg>Stock of HDPE</button>
@@ -94,7 +95,7 @@
         <section class="cards" aria-label="Production lines">
           <div id="shift" data-state="loading"><p class="muted">Loading shift output...</p></div>
           <section class="card events-card" id="events-card" aria-labelledby="events-h">
-            <h2 id="events-h">Factory events</h2>
+            <h2 id="events-h">Alarms and events</h2>
             <p class="muted" id="live-clock">Connecting to the line simulation...</p>
             <ol id="events" class="events-list" data-state="loading" aria-label="Latest simulation events"></ol>
           </section>
@@ -106,8 +107,8 @@
             <h2 id="chat-h">Chat</h2>
             <ol id="transcript" class="transcript" aria-label="Conversation"></ol>
             <div class="suggest" data-expanded hidden role="group" aria-label="Example requests">
-              <button type="button" data-say="line status">Line status</button>
-              <button type="button" data-say="factory events">Factory events</button>
+              <button type="button" data-say="why is line 2 down">Why is line 2 down?</button>
+              <button type="button" data-say="is the sealer temperature normal">Sealer temperature</button>
               <button type="button" data-say="shift summary">Shift summary</button>
               <button type="button" data-say="open follow-ups">Open follow-ups</button>
               <button type="button" data-say="add handover note for line 2: belt tension checked">Add handover note</button>

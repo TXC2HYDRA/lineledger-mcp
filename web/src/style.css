@@ -499,3 +499,29 @@ button.primary:hover:not(:disabled) { background: var(--color-accent); filter: b
 .events-list li:is([data-kind="fault"], [data-kind="waiting_for_part"]) { color: var(--color-danger); }
 .events-list li:is([data-kind="starved"], [data-kind="stock_low"]) { color: var(--color-warning); }
 .events-list li:is([data-kind="repaired"], [data-kind="material_ok"], [data-kind="repair_started"]) { color: var(--color-success); }
+
+/* plant profile: seven compact line cards, live state, sensor signal, sim clock chip */
+.cards:has(#shift[data-compact="true"]) { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-3); }
+.cards:has(#shift[data-compact="true"]) .events-card { grid-column: span 2; }
+.stat.compact { padding: var(--space-3); gap: var(--space-2); }
+.stat.compact .stat-value { font-size: var(--text-section); }
+.stat.compact > .muted:first-of-type { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat.compact .bar { display: none; }
+.live:not([data-on]) { display: none; }
+.signal { font-size: var(--text-xs); font-weight: 600; }
+.signal[data-level="ok"] { color: var(--color-success); }
+.signal[data-level="warn"] { color: var(--color-warning); }
+.signal[data-level="trip"] { color: var(--color-danger); font-weight: 700; }
+.live-alarm { font-size: var(--text-xs); font-weight: 700; color: var(--color-danger); }
+.live-state[data-state="STOP_FAULT"], .live-state[data-state="STOP_OTHER"] { color: var(--color-danger); }
+.live-state[data-state="RUN"] { color: var(--color-success); }
+.live-state[data-state="IDLE_STARVED"] { color: var(--color-warning); }
+.live-state:is([data-state="PLANNED_STOP"], [data-state="OFF_SHIFT"]) { color: var(--color-text-muted); }
+.sim-chip { margin: 0; display: inline-flex; align-items: center; padding: var(--space-1) var(--space-3); border: 1px solid var(--color-border-strong); border-radius: 999px; background: var(--glass-lift); font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
+.sim-chip[hidden] { display: none; }
+.sim-chip[data-mode="hold"] { color: var(--color-warning); }
+.events-list li[data-kind="alarm-open"] { color: var(--color-danger); font-weight: 700; }
+.events-list li:is([data-kind="stop"], [data-kind="alarm"]) { color: var(--color-danger); }
+.events-list li:is([data-kind="restart"], [data-kind="alarm_clear"]) { color: var(--color-success); }
+.stat.compact .status { white-space: nowrap; }
+.stat.compact .stat-head strong:empty { display: none; }

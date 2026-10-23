@@ -1,5 +1,5 @@
 // End-to-end tests: a real browser drives the web client, which talks over stateful MCP to the real server
-// with the production-line simulation running (random faults off, so every fault in a test is one it made).
+// running the Tarnby Works plant profile (story day, seed 1, x120, no presenter holds).
 // Store: SQLite in memory by default; DynamoDB Local when LINELEDGER_TEST_DYNAMODB_ENDPOINT is set.
 // Own ports (8790 and 5190), so a dev server on the default ports can keep running.
 import { defineConfig } from '@playwright/test'
@@ -11,9 +11,9 @@ const dynamodb = process.env.LINELEDGER_TEST_DYNAMODB_ENDPOINT
 const serverEnv: Record<string, string> = {
   PORT: String(SERVER_PORT),
   WEB_PORT: String(WEB_PORT),
+  LINELEDGER_PLANT: '1',
   LINELEDGER_DB: ':memory:',
-  LINELEDGER_SIM_FAULTS: 'off',
-  LINELEDGER_SIM_SPEED: '60',
+  LINELEDGER_SIM_SPEED: '120',
   ...(dynamodb && {
     LINELEDGER_STORE: 'dynamodb',
     LINELEDGER_DYNAMODB_ENDPOINT: dynamodb,
