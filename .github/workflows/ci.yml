@@ -37,3 +37,24 @@ jobs:
       - run: npm ci
       - run: python -m venv .venv && .venv/bin/python -m pip install -r agent/requirements.txt
       - run: npm run test:agent
+
+  # The same server and store tests against the DynamoDB store on DynamoDB Local. No AWS account.
+  dynamodb-local:
+    runs-on: ubuntu-24.04
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:3.3.1
+        ports:
+          - 8000:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Wait for DynamoDB Local
+        run: for i in $(seq 30); do curl -s -o /dev/null http://127.0.0.1:8000 && exit 0; sleep 1; done; exit 1
+      - run: npm test
+        env:
+          LINELEDGER_TEST_DYNAMODB_ENDPOINT: http://127.0.0.1:8000
