@@ -407,11 +407,20 @@ async function send(text: string, fromVoice: boolean, navigate = true) {
   if (modelMode) {
     setVoice('thinking', 'The agent model is working. A local model can take a while on CPU.')
     let answer: AgentReply | undefined
+    // The agent service reports what it is doing (reading, asking the plant, writing); show that with the time so far.
+    const t0 = Date.now()
+    const poll = setInterval(async () => {
+      const p = (await fetch('/agent/progress').then((r) => r.json()).catch(() => undefined)) as { stage?: string } | undefined
+      const secs = Math.round((Date.now() - t0) / 1000)
+      setVoice('thinking', `${p?.stage || 'Sending to the agent model'} · ${secs} s`)
+    }, 700)
     try {
       answer = await askAgent(text)
     } catch (e) {
       // Last resort: the rule-based planner answers the same request, so the chat never ends in an error.
       addMessage('LineLedger', `Agent model unavailable: ${errorText(e)}. Answering with the rule-based planner instead.`, 'error')
+    } finally {
+      clearInterval(poll)
     }
     if (answer) {
       addMessage('LineLedger', answer.reply) // the model, tokens and tools are in the agent's log and the MCP trace

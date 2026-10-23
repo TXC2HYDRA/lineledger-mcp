@@ -29,7 +29,7 @@ scrub_aws_env(PROVIDER)  # must run before strands (and boto3) is imported
 
 import boto3  # noqa: E402
 from strands import Agent  # noqa: E402
-from strands.hooks import BeforeInvocationEvent, BeforeModelCallEvent, HookProvider, HookRegistry  # noqa: E402
+from strands.hooks import AfterToolCallEvent, BeforeInvocationEvent, BeforeModelCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry  # noqa: E402
 from strands.models.bedrock import BedrockModel  # noqa: E402
 from strands.models.ollama import OllamaModel  # noqa: E402
 from strands.tools.mcp import MCPClient  # noqa: E402
@@ -61,6 +61,42 @@ SYSTEM_PROMPT = (
     "Report a sensor by its level field (ok, warn or trip) next to its value; never compare numbers yourself. "
     "Answer in one or two short sentences suitable for speech."
 )
+
+
+# What the agent is doing right now, for the page to show while a slow local model works (GET /progress).
+PROGRESS = {"stage": "", "since": time.monotonic()}
+
+
+def set_stage(stage: str) -> None:
+    PROGRESS["stage"] = stage
+    PROGRESS["since"] = time.monotonic()
+
+
+class Progress(HookProvider):
+    """Records the real steps of a turn: reading the question, each tool call, writing the answer."""
+
+    def __init__(self) -> None:
+        self.model_calls = 0
+
+    def register_hooks(self, registry: HookRegistry, **_kwargs) -> None:
+        registry.add_callback(BeforeInvocationEvent, self._start)
+        registry.add_callback(BeforeModelCallEvent, self._model)
+        registry.add_callback(BeforeToolCallEvent, self._tool)
+        registry.add_callback(AfterToolCallEvent, self._tool_done)
+
+    def _start(self, _event) -> None:
+        self.model_calls = 0
+        set_stage("Reading your question")
+
+    def _model(self, _event) -> None:
+        self.model_calls += 1
+        set_stage("Deciding what to look up" if self.model_calls == 1 else "Writing the answer")
+
+    def _tool(self, event) -> None:
+        set_stage(f"Asking the plant: {str(event.tool_use.get('name', 'tool')).replace('_', ' ')}")
+
+    def _tool_done(self, _event) -> None:
+        set_stage("Reading the result")
 
 
 class ModelCallLimit(HookProvider):
@@ -132,7 +168,7 @@ def build_agent(
         tools=[mcp],
         system_prompt=SYSTEM_PROMPT,
         callback_handler=None,
-        hooks=[ModelCallLimit(MAX_MODEL_CALLS)],
+        hooks=[Progress(), ModelCallLimit(MAX_MODEL_CALLS)],
     )
     assert_model_allowed(agent.model)
     return agent
@@ -246,6 +282,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_GET(self):  # noqa: N802
+        if self.path != "/progress":
+            return self._send(404, {"error": "not found"})
+        busy = bool(PROGRESS["stage"])
+        self._send(200, {"stage": PROGRESS["stage"], "seconds": round(time.monotonic() - PROGRESS["since"], 1) if busy else 0})
+
     def do_POST(self):  # noqa: N802
         origin = self.headers.get("origin")
         if origin is not None and origin not in self.allowed_origins:
@@ -260,10 +302,13 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, KeyError, TypeError):
             return self._send(400, {"error": 'expected JSON {"text": "..."}'})
         started = time.monotonic()
+        set_stage("Starting")
         try:
             result, calls, provider = self.runner.answer(text)
         except Exception as error:  # surface model/connection errors to the UI, never fake success
+            set_stage("")
             return self._send(502, {"error": f"{type(error).__name__}: {error}"})
+        set_stage("")
         body = {
             "reply": str(result).strip(),
             "tool_calls": calls,
