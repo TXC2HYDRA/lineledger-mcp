@@ -611,7 +611,10 @@ startTrace()
 void (async () => {
   try {
     await mcp.connect()
-    setConn('connected', `MCP connected · protocol ${mcp.protocolVersion}`)
+    // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
+    const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string }
+    const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ' · store: SQLite' : ''
+    setConn('connected', `MCP connected · protocol ${mcp.protocolVersion}${store}`)
     addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()
