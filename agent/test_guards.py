@@ -262,3 +262,32 @@ class LimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FallbackTests(unittest.TestCase):
+    """A failed Bedrock turn is answered by the local Ollama agent; nothing else falls back."""
+
+    def setUp(self):
+        import service
+        self.service = service
+
+    def test_failed_bedrock_turn_is_retried_on_ollama(self):
+        primary = mock.Mock(side_effect=RuntimeError("throttled"))
+        local = mock.Mock(return_value="local answer")
+        local.messages = [1, 2]
+        result, used, provider = self.service.ask_with_fallback(primary, "hi", "bedrock", lambda: local)
+        self.assertEqual((result, used, provider), ("local answer", local, "ollama"))
+        self.assertEqual(local.messages, [])
+
+    def test_no_fallback_for_ollama_or_when_switched_off(self):
+        failing = mock.Mock(side_effect=RuntimeError("down"))
+        with self.assertRaises(RuntimeError):
+            self.service.ask_with_fallback(failing, "hi", "ollama", lambda: self.fail("must not build"))
+        with mock.patch.object(self.service, "FALLBACK", False):
+            with self.assertRaises(RuntimeError):
+                self.service.ask_with_fallback(failing, "hi", "bedrock", lambda: self.fail("must not build"))
+
+    def test_working_primary_is_used_as_is(self):
+        ok = mock.Mock(return_value="fine")
+        result, used, provider = self.service.ask_with_fallback(ok, "hi", "bedrock", lambda: self.fail("must not build"))
+        self.assertEqual((result, used, provider), ("fine", ok, "bedrock"))

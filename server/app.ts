@@ -68,7 +68,7 @@ export function createApp({ store, notifier = noNotifier, trace = new TraceTap()
   app.delete('/mcp', notAllowed)
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind })
+    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, degraded: store.degraded ?? false })
   })
   app.get('/api/trace', (req, res) => {
     res.json({ entries: trace.list(Number(req.query.since) || 0) })

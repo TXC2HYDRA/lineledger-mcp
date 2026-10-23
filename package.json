@@ -12,6 +12,7 @@
     "preflight:mcp": "tsx scripts/mcp-preflight.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "dev:server": "tsx server/main.ts",
+    "report": "tsx scripts/shift-report.ts",
     "dynamodb:local-table": "tsx scripts/dynamodb.ts create-local",
     "dynamodb:seed": "tsx scripts/dynamodb.ts seed",
     "test": "vitest run",
