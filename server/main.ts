@@ -24,7 +24,9 @@ let sim: FactorySim | undefined
 if (plant) {
   // A fresh plant store gets a week of simulated shifts first. An older plant database loses the two-line demo rows
   // it was made with, and gets the same week.
-  if ((await applyPlantSeed(store)) || (store instanceof SqliteStore && store.dropDemoSeed())) await FactorySim.history(store)
+  const fresh = await applyPlantSeed(store)
+  const dropped = store instanceof SqliteStore && store.dropDemoSeed()
+  if (fresh || dropped) await FactorySim.history(store)
   // LINELEDGER_SIM_SPEED: simulated seconds per real second (default 120: one simulated hour in 30 seconds).
   const speed = Number(process.env.LINELEDGER_SIM_SPEED ?? 120)
   if (!Number.isFinite(speed) || speed <= 0 || speed > 3600) throw new Error('LINELEDGER_SIM_SPEED must be a number from 0 to 3600')
