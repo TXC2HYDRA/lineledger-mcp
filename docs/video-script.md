@@ -35,7 +35,7 @@ Target length 2:40, hard limit 3:00. Narration is written for the author to read
 | Time | On screen | Narration | Exact input |
 |---|---|---|---|
 | 0:00 - 0:14 | Full page, nothing typed yet. Cursor still. | "Shift handover on a factory floor often lives on paper or in someone's head. LineLedger is a voice-first co-pilot for a plant manager, built for the Alexa+ track. This is a simulated voice experience in a web app, with synthetic data." | none |
-| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server with fifteen tools, and a live simulation of two production lines. The sidebar shows the protocol version and this browser's MCP session. The trace drawer shows the real messages." | none |
+| 0:14 - 0:30 | Slow cursor move over the badge, the connection line, the hero metric, the chat, the trace tile and the data cards. | "Behind the chat is a self-hosted MCP server, and a simulated plant: a fictional factory with seven lines. The sidebar shows the protocol version and this browser's MCP session. The trace drawer shows the real messages." | none |
 | 0:30 - 0:48 | Click the "Shift summary" button. A new `tools/call` for `get_shift_summary` appears at the end of the trace (the dashboard already called it once on page load, so older entries are above it). The dashboard shows both lines with status. | "Shift summary. The assistant calls one tool and reads back output against target. Line 2 is flagged behind." [On the seed data Line 1 shows "at risk", so do not say both are behind.] | click button "Shift summary" (sends `shift summary`) |
 | 0:48 - 1:08 | Type in the box and press Send. Trace shows `create_handover_note`, then a `list_handover_notes` call from the dashboard refresh. The new note appears in the dashboard Handover notes list. | "Now a handover note, saved through a tool call." | `add handover note for line 2: sealer jaw ran hot again at 14:00, heater band swapped` |
 | 1:08 - 1:25 | Type and Send. Trace shows `create_follow_up`, then a `list_follow_ups` call from the dashboard refresh. Dashboard Open follow-ups now has three entries. | "And a follow-up with an owner and a due date." | `add follow-up: re-check the guard, owner Asha, due 2026-10-24, line 2` |
@@ -75,7 +75,7 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 
   This is a simulated voice experience in a web app. All data is synthetic demo data. It is not connected to a real factory, a physical device or real customers.
 
-  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with fifteen tools and a live production-line simulation pushed over a stateful MCP session, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
+  What you see: a self-hosted MCP server (TypeScript, Streamable HTTP, protocol 2025-11-25) with twelve tools and a simulated seven-line plant pushed over a stateful MCP session, a live trace of the real MCP messages, SQLite persistence, and a container-load tool that calls a separate open source package.
 
   Repository (MIT): https://github.com/TXC2HYDRA/lineledger-mcp
   Container-load package (MIT): https://github.com/TXC2HYDRA/container-load-planner
@@ -94,12 +94,26 @@ These are not part of the 2:40 plan. If you add one, drop the stock beat to stay
 - Local model reliability: only one 10-prompt spike, with 3 of 10 prompts wrong or failed. See `docs/spike-results.md`.
 - The container-load-planner CI status and its test count. [VERIFY before saying anything about them.]
 
-## Optional simulation beat (2026-10-23)
+## Plant story shot list (2026-10-23, replaces the beats above if you record the plant)
 
-If there is room, replace or shorten another beat with about 20 seconds of the live simulation. Start the
-server with `LINELEDGER_SIM_FAULTS=off` so nothing breaks on its own, and start recording within two
-minutes (Line 2 runs out of HDPE about three minutes after the server starts).
+Setup: `npm run plant:reset`, then `LINELEDGER_SIM_HOLDS=on npm run dev:plant` and `npm run dev:web`, and
+start recording when the page connects (plant time 12:55). The clock pauses 12 s at 12:58, 13:15 and 13:23
+(the chip shows HOLD) so you can speak. Say "simulated" once, early. No music, no third-party logos, the
+synthetic badge and the clock chip on screen all the time. Do not restart the server on camera.
 
-| Time | On screen | Say | Check |
+| Video | Plant time | On screen | Say or type |
 |---|---|---|---|
-| 20 s | Line cards with the live strip moving. Click "Simulate fault" on Line 2: the card turns to LIVE DOWN and the event feed shows the fault. Click "Clear fault": LIVE RUNNING again. Open the trace and point at a "← push notifications/resources/updated" line. | "The two lines are a live simulation. The server pushes every change over this browser's MCP session. A fault stops the line; maintenance clears it, through an MCP tool." | Only synthetic data on screen. |
+| 0:00 | 12:55 | Seven line cards, most `▶ RUN`, clock chip `SIM 12:55 · ×120` | "A fictional factory, Tarnby Works: seven lines, about a hundred people, simulated live. Something goes wrong on Line 2 in about a minute." |
+| 0:12 | 12:58 hold | | "How are the lines doing right now?" |
+| 0:25 | 13:05 to 13:15 | Line 2's sealer temperature climbing, `WARN` at 190 °C, alarm ticker shows `M3-TEMP-HI` | At the 13:15 hold: "Is the sealer temperature normal?" |
+| 0:55 | 13:23 hold | Line 2 `■ STOPPED · SEALER_FAULT`, `M3-HEAT-OVR` in red with text and icon | "Why is line 2 down?" |
+| 1:10 | 13:30 | | Click Listen and dictate: "add handover note for line 2: sealer jaw ran hot again, tripped 13:23". Then "handover notes for line 2": the 10-21 note shows the same fault two days running |
+| 1:25 | 13:35 | Follow-ups gains an item | "add follow-up: inspect sealer thermocouple, owner Ravi, due 2026-10-24, line 2" |
+| 1:35 | 13:41 to 13:49 | Line 5 shows `COIL_JAM` and recovers | Voiceover only: "Not every stop is the story." |
+| 1:55 | 14:00 | Clock chip, shift B, lead Joel | "Shift summary for shift A": Line 2 at risk |
+| 2:05 | 14:03 | Line 2 back to `▶ RUN` | "Stock of heater band": 2 left, reorder |
+| 2:15 | 14:10 to 16:15 | `×300 TIME-LAPSE` on the chip | "Stock of HDPE" after about 16:20 shows the reorder |
+| 2:30 | | Open the trace drawer: `← push notifications/resources/updated` followed by `resources/read` | "The server pushed that; the page did not poll." |
+| 2:40 | | Title card | |
+
+Cut from this version: the container planner, the local model and the restart beat.

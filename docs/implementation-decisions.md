@@ -65,7 +65,7 @@ One `McpServer` and one `StreamableHTTPServerTransport({ sessionIdGenerator: ran
 session, kept in an in-memory registry (`SessionRegistry` in `server/app.ts`). `initialize` without a
 session id creates a session; POST, GET (event stream) and DELETE with `Mcp-Session-Id` are routed to it;
 a missing id gets 400, an unknown one 404. Sessions idle for 30 minutes are closed; past 100 sessions the
-least recently used one is closed. Reasons: the production-line simulation (D13) changes every second,
+least recently used one is closed. Reasons: the plant simulation (D13) changes every second,
 and a session is what lets the server push `notifications/resources/updated` for subscribed resources
 instead of the page polling. Data still lives in the store, not in sessions.
 The client gotcha noted in D2 (no re-initialize after a 404, issue #1708) is handled on our side: the web
@@ -179,14 +179,26 @@ the project-only profile in `~/.aws-lineledger/`. Ollama stays the default. Deta
 The tools call an async `Store` (`server/store.ts`) with a SQLite implementation (default) and a DynamoDB
 one (`LINELEDGER_STORE=dynamodb`, one provisioned 5/5 table). Every server test runs on both.
 
-## D13. Production-line simulation (2026-10-23)
+## D13. Tarnby Works plant simulation (2026-10-23)
 
-`server/sim.ts`: two serial lines of three stations, seeded random faults with exponential time between
-failures, repairs after a randomised repair time, a part-dependent fault (heater band), material drawn
-from stock per unit, operator start and stop, shifts A and B in plant time. It writes finished shifts and
-stock levels to the store, so the existing tools see its output. One queue serialises simulation ticks and
-tool calls. Reasons: a live system gives the MCP server something to report and control, and makes the
-stateful push (D2b) visible. It is a teaching model, not a digital twin.
+Built from the handoff `docs/simulation_context.md`, reshaped to the time left (author's choice):
+
+- D-LINES: seven lines, shifts A and B on all lines and C on Lines 2 and 4, about 100 people, as data in
+  `plant/plant.json` (lines, stations, cycles, targets, MTBF, MTTR, reject and downtime mixes, bill of
+  materials, stock, story).
+- D-PROFILE: the plant only with `LINELEDGER_PLANT=1` (own `data/plant.sqlite` by default); the two-line seed,
+  the tests and the older docs are unchanged without it.
+- D-CLOCK: simulated clock x120 by default, a x300 time-lapse stretch from 14:10 to 16:15 and optional 12 s
+  presenter holds, always shown on a clock chip.
+- D-READONLY: LineLedger never controls equipment. The first version's `inject_fault`, `clear_fault` and
+  `set_line_running` tools were removed; faults come from the random model and the scripted story.
+  `receive_stock` stays as a goods receipt, a business record.
+- D-INPROCESS (instead of D-TRANSPORT): the simulation runs inside the server and writes to the store; the
+  handoff's separate simulator with a WebSocket telemetry channel and signed webhooks was not built. The
+  integration boundary for a real gateway would be an ingest endpoint; that is future work.
+- D-STATEFUL: shipped (D2b), so the dashboard is pushed `plant://snapshot` updates instead of polling.
+- Determinism: one simulated minute per step whatever the real tick size; per-line random substreams;
+  seed 1 meets the story checks (`npm run plant:story-check`).
 
 ## Open VERIFY list
 
