@@ -27,10 +27,11 @@ export class McpConnection {
   onReconnect: (() => void) | undefined
   /** When the page last heard from the server: a reply or a push. */
   lastHeard = Date.now()
-  private connected = false
+  /** True after a reconnect failed (the server was down), so the next call tries again. */
+  private stale = false
+  private reopening: Promise<void> | undefined
 
   async connect(): Promise<void> {
-    this.connected = false
     this.client = new Client({ name: 'lineledger-web', version: '0.2.0' })
     this.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => {
       this.lastHeard = Date.now()
@@ -41,13 +42,24 @@ export class McpConnection {
     this.protocolVersion = this.transport.protocolVersion
     this.sessionId = this.transport.sessionId
     for (const uri of this.watchers.keys()) await this.client.subscribeResource({ uri })
-    this.connected = true
+    this.stale = false
   }
 
-  private async reopen(): Promise<void> {
-    await this.client?.close().catch(() => undefined)
-    await this.connect()
-    this.onReconnect?.()
+  /** One reconnect at a time: calls that fail together share it. */
+  private reopen(): Promise<void> {
+    this.reopening ??= (async () => {
+      try {
+        await this.client.close().catch(() => undefined)
+        await this.connect()
+        this.onReconnect?.()
+      } catch (error) {
+        this.stale = true
+        throw error
+      } finally {
+        this.reopening = undefined
+      }
+    })()
+    return this.reopening
   }
 
   private async retry<T>(fn: () => Promise<T>): Promise<T> {
@@ -56,7 +68,7 @@ export class McpConnection {
       this.lastHeard = Date.now()
       return result
     }
-    if (!this.connected) await this.reopen() // an earlier reconnect failed, for example while the server was down
+    if (this.stale) await this.reopen() // an earlier reconnect failed, for example while the server was down
     try {
       return await run()
     } catch (error) {
