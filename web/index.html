@@ -70,7 +70,7 @@
           <button type="submit" id="send"><svg class="ico" aria-hidden="true"><use href="#i-send" /></svg>Send</button>
           <button type="button" id="listen" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-mic" /></svg>Listen</button>
           <button type="button" id="stop-speech" disabled><svg class="ico" aria-hidden="true"><use href="#i-stop" /></svg>Stop speaking</button>
-          <button type="button" id="mode" aria-pressed="false" title="Switch between the rule-based planner and the local model">Planner: rules (no LLM)</button>
+          <button type="button" id="mode" aria-pressed="false" title="Switch between the rule-based planner and the agent model (local Ollama by default, Amazon Bedrock when the agent runs with LINELEDGER_MODEL_PROVIDER=bedrock)">Planner: rules (no LLM)</button>
         </form>
         <button type="button" id="theme" class="icon-btn" aria-pressed="false" aria-label="Light theme" title="Switch between dark and light theme"><svg class="ico" aria-hidden="true"><use href="#i-theme" /></svg></button>
       </header>
