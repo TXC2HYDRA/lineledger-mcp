@@ -2,11 +2,11 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { noNotifier, type Notifier } from './notify.js'
 import type { Store } from './store.js'
 import { registerTools } from './tools.js'
-import { TraceTap } from './trace.js'
+import { createSessionHandlers } from './sessions.js'
+import { TraceTap, traceSends } from './trace.js'
 
 export interface AppOptions {
   store: Store
@@ -14,12 +14,14 @@ export interface AppOptions {
   trace?: TraceTap
   /** Browser origins allowed to call the server. Requests without an Origin header (non-browser clients) pass. */
   allowedOrigins: string[]
+  /** Serve MCP sessions (Mcp-Session-Id) and push change notices. Default: stateless, see decision D2. */
+  stateful?: boolean
 }
 
 const rpcError = (res: Response, status: number, code: number, message: string) =>
   res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null })
 
-export function createApp({ store, notifier = noNotifier, trace = new TraceTap(), allowedOrigins }: AppOptions) {
+export function createApp({ store, notifier = noNotifier, trace = new TraceTap(), allowedOrigins, stateful = false }: AppOptions) {
   const app = express()
   app.disable('x-powered-by')
 
@@ -35,7 +37,7 @@ export function createApp({ store, notifier = noNotifier, trace = new TraceTap()
   })
   app.use(express.json({ limit: '64kb' }))
 
-  app.post('/mcp', async (req: Request, res: Response) => {
+  const statelessPost = async (req: Request, res: Response) => {
     // Stateless (decision D2): a new server and transport per request, state lives in the store.
     const server = new McpServer({ name: 'lineledger', version: '0.1.0' })
     registerTools(server, store, notifier)
@@ -43,11 +45,7 @@ export function createApp({ store, notifier = noNotifier, trace = new TraceTap()
 
     const inbound: unknown = req.body
     for (const message of Array.isArray(inbound) ? inbound : [inbound]) trace.record('in', message)
-    const send = transport.send.bind(transport)
-    transport.send = (message: JSONRPCMessage, options) => {
-      trace.record('out', message)
-      return send(message, options)
-    }
+    traceSends(transport, trace)
 
     res.on('close', () => {
       void transport.close()
@@ -59,16 +57,24 @@ export function createApp({ store, notifier = noNotifier, trace = new TraceTap()
     } catch {
       if (!res.headersSent) rpcError(res, 500, -32603, 'Internal server error')
     }
-  })
+  }
   const notAllowed = (_req: Request, res: Response) => {
     res.set('Allow', 'POST')
     rpcError(res, 405, -32000, 'Method not allowed.')
   }
-  app.get('/mcp', notAllowed)
-  app.delete('/mcp', notAllowed)
+  const sessions = stateful ? createSessionHandlers(store, trace, notifier) : undefined
+  if (sessions) {
+    app.post('/mcp', sessions.post)
+    app.get('/mcp', sessions.stream)
+    app.delete('/mcp', sessions.stream)
+  } else {
+    app.post('/mcp', statelessPost)
+    app.get('/mcp', notAllowed)
+    app.delete('/mcp', notAllowed)
+  }
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, degraded: store.degraded ?? false })
+    res.json({ ok: true, name: 'lineledger', synthetic: true, store: store.kind, degraded: store.degraded ?? false, stateful, sessions: sessions?.sessionCount() ?? 0 })
   })
   app.get('/api/trace', (req, res) => {
     res.json({ entries: trace.list(Number(req.query.since) || 0) })

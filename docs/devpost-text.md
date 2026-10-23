@@ -20,12 +20,12 @@ The server, database and web app run on one machine and use no paid service or c
 
 ## Key features
 
-- An MCP server written in TypeScript (`@modelcontextprotocol/sdk` 1.32.1) using stateless Streamable HTTP. It negotiates protocol version 2025-11-25; the preflight script and the tests check this.
+- An MCP server written in TypeScript (`@modelcontextprotocol/sdk` 1.32.1) using stateless Streamable HTTP by default, with an opt-in stateful session mode (`LINELEDGER_STATEFUL=1`). It negotiates protocol version 2025-11-25; the preflight script and the tests check this.
 - Nine tools: `get_shift_summary`, `get_shift_history` (read-only, feeds the dashboard trend chart), `create_handover_note`, `list_handover_notes`, `create_follow_up`, `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.
 - Every tool has a zod input schema and output schema and returns `structuredContent`. Invalid input comes back as an `isError` result.
 - Handover notes and follow-ups persist in SQLite (`node:sqlite`).
 - `plan_container_load` calls a separate open-source package, container-load-planner (MIT), which counts how many identical boxes fit in a container on a uniform grid, limited by geometry and payload weight. It is a calculator, not a packing optimiser, and the 20ft and 40ft container sizes in the planner are fixed example values, not carrier specifications.
-- Server hardening: Origin allowlist (requests with no Origin header, such as non-browser clients, are allowed) and Host check, 64 KB request body limit, 405 on GET and DELETE for `/mcp`, bound to 127.0.0.1.
+- Server hardening: Origin allowlist (requests with no Origin header, such as non-browser clients, are allowed) and Host check, 64 KB request body limit, 405 on GET and DELETE for `/mcp` in the default stateless mode, bound to 127.0.0.1.
 - A live MCP trace, shown as a dashboard tile with a message count and a full JSON-RPC drawer. It is fed by a server-side trace tap, so it shows only messages that actually reached the server (the tap keeps the latest 500).
 - A Bento Grid web interface with translucent glass cards, a dark and a light theme (toggle in the top bar, remembered in the browser), a left sidebar that can be closed (open: one long page whose links scroll to Home, Assistant, Follow-ups, Handover and Container load; closed: a one-screen dashboard), a plant-output hero metric, per-line cards, chat, output-versus-target bars, a shift trend chart, handover, follow-up and container-load panels, and a voice-state strip (idle, listening, thinking, speaking, error). State is shown with text and an icon, not colour alone. `npm run check:contrast` checks 194 colour pairs against WCAG contrast thresholds, in both themes, with the translucent glass surfaces composited over the page.
 - Voice input starts only after the user clicks Listen. Typing always works. Spoken replies can be stopped.
@@ -37,7 +37,7 @@ The server, database and web app run on one machine and use no paid service or c
 1. The web client (Vite and vanilla TypeScript) takes a typed or spoken request.
 2. The planner turns the request into a single tool call. The default planner is rule-based: regular expressions and keyword rules in `web/src/planner.ts`, with no language model.
 3. The client sends the call through a same-origin proxy (the Vite dev server proxies `/mcp`, `/api` and `/agent`), so no CORS setup is needed.
-4. The MCP server receives it over Streamable HTTP. The server is stateless: each POST creates a new server and transport, and state lives in SQLite, not in MCP sessions.
+4. The MCP server receives it over Streamable HTTP. By default the server is stateless: each POST creates a new server and transport, and state lives in SQLite, not in MCP sessions. With `LINELEDGER_STATEFUL=1` it keeps one server and transport per MCP session instead; a write by one session pushes a `data_changed` notice to the others, and the browser starts a new session by itself after a server restart. Both modes use the same tools and the same SQLite data.
 5. The tool reads or writes SQLite. For `plan_container_load` it calls the container-load-planner package (pinned to commit `3c4fe91`).
 6. A trace tap on the server records each JSON-RPC message in and out. The UI reads it from `/api/trace` and `/api/trace/stream` and shows it in the trace panel.
 7. The result is shown in the chat and the dashboard, and can be read aloud with browser speech synthesis.
@@ -63,11 +63,12 @@ Optional local-model agent: the repository also contains a small Python service 
 - The project does not monitor live equipment.
 - Speech recognition uses the browser's Web Speech API. In Chrome this sends audio to the browser vendor's speech service, which this project does not run. Typing works without it.
 - Speech has not been tested in a real browser with a microphone, and no claim is made that it works reliably in factory noise.
+- Stateful mode (opt-in, off by default) was checked with automated tests and one automated headless-Chrome run (a second session's write appeared in the open page, and the page kept working after a server restart). Not tested: stateful mode with the optional Python agent, more than one server process, and a hand-driven demo of it.
 - Not tested: production `vite preview` and a full real-keyboard pass. The local-model agent had one 10-prompt spike (7 correct, 1 partly wrong, 2 failed, about 13 s per turn on CPU); it is an experiment, not the tested path. See `docs/spike-results.md`.
 - No AWS service or other paid cloud API is used or called. The project needs no cloud credentials.
 - `node:sqlite` is an experimental Node feature and prints an ExperimentalWarning at startup.
 
-What was tested: `npm test` (21 tests, including a real MCP client over HTTP, hardening checks and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
+What was tested: `npm test` (28 tests, including a real MCP client over HTTP in both modes, hardening checks, session recovery and the planner), `npm run test:agent` (3 tests, the agent guards), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
 
 ## Setup
 
@@ -75,6 +76,7 @@ What was tested: `npm test` (21 tests, including a real MCP client over HTTP, ha
 git clone https://github.com/TXC2HYDRA/lineledger-mcp.git && cd lineledger-mcp   # Node 22.12 or newer, no API key; npm install needs internet to fetch packages, including the planner from GitHub
 npm install
 npm run dev:server    # MCP server on http://127.0.0.1:8787/mcp
+                      # optional session mode: LINELEDGER_STATEFUL=1 npm run dev:server
 npm run dev:web       # web client on http://127.0.0.1:5173
 npm test              # optional: run the tests
 ```
@@ -91,6 +93,7 @@ Taken from `docs/friction-log.md`:
 - There is no documented hook for tracing JSON-RPC on the HTTP transport, so we wrapped `transport.send` and recorded the request body to build the trace tap.
 - Strands constructs and starts the MCP client when the Agent is created, so the guard test starts the real MCP server first.
 - `streamablehttp_client` is deprecated in mcp 1.30.0; passing `MCPClient(url=...)` to Strands avoids it.
+- The SDK client does not start a new session after a 404 for a dropped session (SDK 1.32.1), so the opt-in stateful mode reconnects in our own wrapper.
 - Strands' default `Agent()` builds a Bedrock model, which triggers an AWS credential lookup, so the agent service guards against it.
 
 Would we build this again, and why: [AUTHOR TO CONFIRM] Suggested draft: "Yes, for the MCP part. A small stateless server with typed tools was quick to build and easy to test, and the trace panel made the protocol visible. I would want to test speech on a real device and in a noisy environment before saying more about the voice side." Edit or replace with your own view.
@@ -103,7 +106,7 @@ Would we build this again, and why: [AUTHOR TO CONFIRM] Suggested draft: "Yes, f
 - [ ] [VERIFY] https://github.com/TXC2HYDRA/lineledger-mcp is public, and the `main` branch holds the code you are submitting (last verified from a clean clone at `5d9834c`).
 - [ ] [VERIFY] GitHub shows an MIT license for both repositories (check the license badge in the repository sidebar).
 - [ ] [VERIFY] Form values: GitHub username `TXC2HYDRA`; contribution URL `https://github.com/TXC2HYDRA/container-load-planner`; project repository URL `https://github.com/TXC2HYDRA/lineledger-mcp`.
-- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (21 tests, 3 agent tests).
+- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (28 tests, 3 agent tests).
 - [ ] [VERIFY] The Alexa+ track and the Open Source mini challenge are selected on Devpost. Select the AWS Builder challenge only after you have read its official rules and they accept an entry that uses the Strands SDK with a local model and no AWS service call. Otherwise delete its paragraph above.
 - [ ] [AUTHOR TO CONFIRM] The "would we build this again" answer is in your own words.
 - [ ] Submit before 2026-10-23 12:00 PM PT.

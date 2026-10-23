@@ -12,6 +12,7 @@ const store = await openStore(process.env)
 // LINELEDGER_NOTIFY=none (default) or sns (see server/notify.ts).
 const notifier = openNotifier(process.env)
 // Bind to loopback only.
-createApp({ store, notifier, allowedOrigins }).listen(port, '127.0.0.1', () => {
-  console.log(`LineLedger MCP server (synthetic demo data, store: ${store.kind}, alerts: ${notifier.kind}) on http://127.0.0.1:${port}/mcp`)
+const stateful = process.env.LINELEDGER_STATEFUL === '1'
+createApp({ store, notifier, allowedOrigins, stateful }).listen(port, '127.0.0.1', () => {
+  console.log(`LineLedger MCP server (synthetic demo data, store: ${store.kind}, alerts: ${notifier.kind}, ${stateful ? 'stateful sessions' : 'stateless'}) on http://127.0.0.1:${port}/mcp`)
 })

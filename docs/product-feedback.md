@@ -4,7 +4,7 @@ LineLedger is a simulated voice co-pilot for a plant manager, backed by a self-h
 
 ## Tools used
 
-- **MCP TypeScript SDK 1.32.1**: server (stateless Streamable HTTP, nine tools with zod input and output schemas) and the browser client.
+- **MCP TypeScript SDK 1.32.1**: server (stateless Streamable HTTP by default, with an opt-in session mode that pushes change notices; nine tools with zod input and output schemas) and the browser client.
 - **Strands Agents Python SDK (partly)**: an `agent/` service wired to a local Ollama model, with guards against accidental AWS or Bedrock use. Its guard tests pass (3 tests), including discovery of MCP tools over Streamable HTTP (the test asserts three tool names, not all nine). A 10-prompt spike against a local model got 7 prompts fully right, so I treat the agent as an experiment and do not claim it is reliable (see `docs/spike-results.md`).
 - **Vite**, **node:sqlite**, **vitest**, **headless Chrome** (to drive the dev page), and the **Web Speech API** (mic starts only after a click; typing always works).
 
@@ -88,3 +88,11 @@ Each is taken from the friction log (`docs/friction-log.md`). Priority is our ow
    - Workaround: use a non-thinking model (`qwen3:4b-instruct`).
    - Suggestion: a warning from the provider, and docs listing which models honour the option.
    - Priority: Important (it looks like a model bug and costs hours).
+
+6. **Re-initialize after a 404 on a dropped session**
+   - Task: run an optional stateful server and keep the browser client working after a server restart.
+   - Expected: the client starts a new session when the server answers 404 for its session id.
+   - Actual: every later call failed with `StreamableHTTPError` 404 (SDK 1.32.1).
+   - Workaround: reconnect once and retry in our own wrapper (`web/src/mcp.ts`).
+   - Suggestion: re-initialize in the transport or client when a session id was in use, or offer an option.
+   - Priority: Important (the transport spec requires this behaviour, and the failure is silent until the page is reloaded).

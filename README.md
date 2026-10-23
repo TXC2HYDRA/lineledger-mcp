@@ -76,16 +76,28 @@ Where `@modelcontextprotocol/sdk` 1.32.1 is imported and called at runtime:
 
 | File | What it does |
 |---|---|
-| `server/app.ts` | Creates an `McpServer` and a `StreamableHTTPServerTransport` per POST to `/mcp`, calls `server.connect(transport)` and `transport.handleRequest(...)`. Uses the SDK's `hostHeaderValidation`. |
+| `server/app.ts` | Default (stateless): creates an `McpServer` and a `StreamableHTTPServerTransport` per POST to `/mcp`, calls `server.connect(transport)` and `transport.handleRequest(...)`. Uses the SDK's `hostHeaderValidation`. |
+| `server/sessions.ts` | Opt-in stateful mode (`LINELEDGER_STATEFUL=1`): one `McpServer` and transport per MCP session, `Mcp-Session-Id` routing, and a `notifications/message` push to every session when a note or follow-up changes. |
 | `server/tools.ts` | Nine `server.registerTool(...)` calls with zod input and output schemas, `structuredContent`, `isError` results and tool annotations. |
 | `web/src/mcp.ts` | The browser uses the SDK `Client` with `StreamableHTTPClientTransport` to call the tools. |
 | `scripts/mcp-preflight.ts` | Starts a minimal one-tool (`ping`) server on an ephemeral port, separate from the LineLedger server, and runs `initialize`, `tools/list` and `tools/call` through the SDK client. It checks the SDK and protocol version, not the nine LineLedger tools. |
-| `tests/server.test.ts` | A real SDK client talks to the server over HTTP. |
+| `tests/server.test.ts` | A real SDK client talks to the stateless server over HTTP. |
+| `tests/stateful.test.ts` | Sessions, 404 and 400 handling, Origin and body limits, push between two sessions, and reconnect after a dropped session or a server restart. |
+| `tests/web-client.test.ts` | The browser client against the stateless server: no session, no reconnect. |
 
 Transport behaviour: stateless Streamable HTTP, `GET` and `DELETE` on `/mcp` return 405 with
 `Allow: POST`, the server binds to `127.0.0.1` only, requests are checked for Host and Origin, and
 request bodies are limited to 64 KB. A server-side trace tap records every JSON-RPC message in and
 out and streams it to the UI, so the trace panel shows only real traffic.
+
+Optional stateful mode: start the server with `LINELEDGER_STATEFUL=1 npm run dev:server`. The server then
+issues an `Mcp-Session-Id`, `GET /mcp` opens a server-to-client stream, and `DELETE /mcp` ends the session.
+When one session creates a handover note or a follow-up or closes a follow-up, the server pushes a
+`data_changed` notice to every session, so a second browser tab refreshes its lists without a click.
+After a server restart the old session id gets a 404; the browser client starts a new session and retries
+once, so the page keeps working without a reload. Notes and follow-ups are still in SQLite and survive
+a restart. Limits: at most 50 sessions, idle sessions are dropped after 2 hours, and sessions are held in
+memory. `/api/health` shows `stateful` and the session count. Default mode is unchanged.
 
 Tools: `get_shift_summary`, `get_shift_history` (feeds the dashboard trend chart), `create_handover_note`, `list_handover_notes`, `create_follow_up`,
 `list_follow_ups`, `close_follow_up`, `check_stock`, `plan_container_load`.

@@ -608,14 +608,23 @@ themeBtn.addEventListener('click', () => {
 })
 
 // ---- start ----------------------------------------------------------------------------------
+let storeNote = ''
+const connectedText = () => `MCP connected · protocol ${mcp.protocolVersion}${storeNote}${mcp.sessionId ? ' · live session' : ''}`
 startTrace()
 void (async () => {
   try {
+    // Stateful server only: it pushes a notice when another session wrote a note or follow-up.
+    mcp.onChange = (resource) => {
+      if (resource === 'follow_ups') void refreshFollowUps()
+      if (resource === 'handover_notes') void refreshNotes()
+    }
+    mcp.onReconnect = () => setConn('connected', connectedText())
     await mcp.connect()
     // Which store the server runs on (SQLite by default, Amazon DynamoDB when LINELEDGER_STORE=dynamodb).
     const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; degraded?: boolean }
     const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ` · store: SQLite${health.degraded ? ' (fallback)' : ''}` : ''
-    setConn('connected', `MCP connected · protocol ${mcp.protocolVersion}${store}`)
+    storeNote = store
+    setConn('connected', connectedText())
     addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()

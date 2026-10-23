@@ -34,7 +34,15 @@ const followUpShape = {
   closed_at: z.string().nullable(),
 }
 
-export function registerTools(server: McpServer, store: Store, notifier: Notifier = noNotifier): void {
+/** What a write tool changed. Stateful mode pushes this to every connected session. */
+export type ChangeResource = 'follow_ups' | 'handover_notes'
+
+export function registerTools(
+  server: McpServer,
+  store: Store,
+  notifier: Notifier = noNotifier,
+  onChange: (resource: ChangeResource) => void = () => {},
+): void {
   server.registerTool(
     'get_shift_summary',
     {
@@ -142,6 +150,7 @@ export function registerTools(server: McpServer, store: Store, notifier: Notifie
     async ({ author, text, line_id }) => {
       if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
       const note = await store.addNote({ line_id: line_id ?? null, author, text, created_at: new Date().toISOString() })
+      onChange('handover_notes')
       return ok({ ...note })
     },
   )
@@ -185,6 +194,7 @@ export function registerTools(server: McpServer, store: Store, notifier: Notifie
         subject: `New follow-up #${followUp.id}: ${followUp.title}`,
         message: `${followUp.title}\nOwner: ${followUp.owner}\nLine: ${followUp.line_id ?? 'none'}\nDue: ${followUp.due_date ?? 'none'}`,
       })
+      onChange('follow_ups')
       return ok({ ...followUp })
     },
   )
@@ -220,6 +230,7 @@ export function registerTools(server: McpServer, store: Store, notifier: Notifie
       const result = await store.closeFollowUp(id, new Date().toISOString())
       if (result === 'not_found') return fail(`Follow-up ${id} not found.`)
       if (result === 'already_closed') return fail(`Follow-up ${id} is already closed.`)
+      onChange('follow_ups')
       return ok({ ...result })
     },
   )
