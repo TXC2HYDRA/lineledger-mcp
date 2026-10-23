@@ -30,6 +30,12 @@
         "dynamodb:DeleteTable"
       ],
       "Resource": "arn:aws:dynamodb:us-east-1:ACCOUNT_ID:table/lineledger"
+    },
+    {
+      "Sid": "AlertTopicOnly",
+      "Effect": "Allow",
+      "Action": ["sns:Publish"],
+      "Resource": "arn:aws:sns:us-east-1:ACCOUNT_ID:lineledger-alerts"
     }
   ]
 }
