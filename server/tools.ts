@@ -35,7 +35,10 @@ const followUpShape = {
 type Row = Record<string, string | number | null>
 const lineExists = (db: Db, id: string): boolean => db.prepare('SELECT 1 FROM lines WHERE id = ?').get(id) !== undefined
 
-export function registerTools(server: McpServer, db: Db): void {
+/** What a write tool changed. Stateful mode pushes this to every connected session. */
+export type ChangeResource = 'follow_ups' | 'handover_notes'
+
+export function registerTools(server: McpServer, db: Db, onChange: (resource: ChangeResource) => void = () => {}): void {
   server.registerTool(
     'get_shift_summary',
     {
@@ -165,6 +168,7 @@ export function registerTools(server: McpServer, db: Db): void {
       const { lastInsertRowid } = db
         .prepare('INSERT INTO handover_notes (line_id, author, text, created_at) VALUES (?, ?, ?, ?)')
         .run(line_id ?? null, author, text, created_at)
+      onChange('handover_notes')
       return ok({ id: Number(lastInsertRowid), line_id: line_id ?? null, author, text, created_at })
     },
   )
@@ -212,6 +216,7 @@ export function registerTools(server: McpServer, db: Db): void {
       const { lastInsertRowid } = db
         .prepare('INSERT INTO follow_ups (title, owner, line_id, due_date, created_at) VALUES (?, ?, ?, ?, ?)')
         .run(title, owner, line_id ?? null, due_date ?? null, created_at)
+      onChange('follow_ups')
       return ok({
         id: Number(lastInsertRowid),
         title,
@@ -263,6 +268,7 @@ export function registerTools(server: McpServer, db: Db): void {
       if (!row) return fail(`Follow-up ${id} not found.`)
       if (row.status === 'closed') return fail(`Follow-up ${id} is already closed.`)
       db.prepare("UPDATE follow_ups SET status = 'closed', closed_at = ? WHERE id = ?").run(new Date().toISOString(), id)
+      onChange('follow_ups')
       return ok(db.prepare('SELECT * FROM follow_ups WHERE id = ?').get(id) as Row)
     },
   )

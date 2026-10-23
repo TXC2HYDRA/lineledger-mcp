@@ -8,6 +8,7 @@ const allowedOrigins = process.env.LINELEDGER_ALLOWED_ORIGINS?.split(',').map((o
 
 const db = openDb(process.env.LINELEDGER_DB ?? 'data/lineledger.sqlite')
 // Bind to loopback only.
-createApp({ db, allowedOrigins }).listen(port, '127.0.0.1', () => {
-  console.log(`LineLedger MCP server (synthetic demo data) on http://127.0.0.1:${port}/mcp`)
+const stateful = process.env.LINELEDGER_STATEFUL === '1'
+createApp({ db, allowedOrigins, stateful }).listen(port, '127.0.0.1', () => {
+  console.log(`LineLedger MCP server (synthetic demo data, ${stateful ? 'stateful sessions' : 'stateless'}) on http://127.0.0.1:${port}/mcp`)
 })

@@ -604,11 +604,18 @@ themeBtn.addEventListener('click', () => {
 })
 
 // ---- start ----------------------------------------------------------------------------------
+const connectedText = () => `MCP connected · protocol ${mcp.protocolVersion}${mcp.sessionId ? ' · live session' : ''}`
 startTrace()
 void (async () => {
   try {
+    // Stateful server only: it pushes a notice when another session wrote a note or follow-up.
+    mcp.onChange = (resource) => {
+      if (resource === 'follow_ups') void refreshFollowUps()
+      if (resource === 'handover_notes') void refreshNotes()
+    }
+    mcp.onReconnect = () => setConn('connected', connectedText())
     await mcp.connect()
-    setConn('connected', `MCP connected · protocol ${mcp.protocolVersion}`)
+    setConn('connected', connectedText())
     addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask about shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()
