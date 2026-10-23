@@ -71,7 +71,7 @@ Optional local-model agent: the repository also contains a small Python service 
 - The simulation is a planning-grade model with tuned, synthetic numbers, not a digital twin. The plant percent in the shift summary adds different products weighted by target; it is not a physical quantity.
 - `node:sqlite` is an experimental Node feature and prints an ExperimentalWarning at startup.
 
-What was tested: `npm test` (48 tests on SQLite, including a real MCP client over HTTP, stateful sessions and server push, every tool, the simulation engine, hardening checks and the planner; 88 with `npm run test:dynamodb`, which repeats the server, store and simulation tests on the DynamoDB store), `npm run test:e2e` (6 Playwright tests: a real browser against the real server and simulation), `npm run test:agent` (15 tests: agent guards and session recovery), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
+What was tested: `npm test` (50 tests on SQLite, including a real MCP client over HTTP, stateful sessions and server push, every tool in both profiles, the plant simulation and its story day, hardening checks and the planner; 90 with `npm run test:dynamodb`, which repeats the server, store and simulation tests on the DynamoDB store), `npm run test:e2e` (7 Playwright tests: a real browser against the real server running the plant story), `npm run plant:story-check` (the story day's numbers), `npm run test:agent` (15 tests: agent guards and session recovery), `npm run typecheck`, `npm run build`, and `npm audit` (0 vulnerabilities).
 
 ## Setup
 
@@ -107,7 +107,7 @@ Would we build this again, and why: [AUTHOR TO CONFIRM] Suggested draft: "Yes, f
 - [ ] [VERIFY] https://github.com/TXC2HYDRA/lineledger-mcp is public, and the `main` branch holds the code you are submitting (last verified from a clean clone at `5d9834c`).
 - [ ] [VERIFY] GitHub shows an MIT license for both repositories (check the license badge in the repository sidebar).
 - [ ] [VERIFY] Form values: GitHub username `TXC2HYDRA`; contribution URL `https://github.com/TXC2HYDRA/container-load-planner`; project repository URL `https://github.com/TXC2HYDRA/lineledger-mcp`.
-- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (48 tests, 6 end-to-end tests, 15 agent tests).
+- [ ] [VERIFY] A fresh clone follows the Setup steps and `npm test` passes, with the counts quoted in this text (50 tests, 7 end-to-end tests, 15 agent tests).
 - [ ] [VERIFY] The Alexa+ track and the Open Source mini challenge are selected on Devpost. Select the AWS Builder challenge only after you have read its official rules and they accept an entry that uses the Strands SDK with a local model and no AWS service call. Otherwise delete its paragraph above.
 - [ ] [AUTHOR TO CONFIRM] The "would we build this again" answer is in your own words.
 - [ ] Submit before 2026-10-23 12:00 PM PT.
