@@ -1,6 +1,19 @@
 # AWS integration plan: Bedrock, DynamoDB, Lambda
 
-Status: PLAN ONLY. Written 2026-10-22 14:30 IST. No AWS account exists for this project, no AWS call has
+## Implementation status (2026-10-22, evening)
+
+- Phase 1 code (Bedrock provider for the agent) and Phase 2 code (store interface, DynamoDB store) are
+  written and tested with no AWS account: 13 agent guard tests with mocked credentials; every server test
+  now runs on both stores, plus store-level tests that compare SQLite and DynamoDB row by row. The DynamoDB
+  runs used a local emulator (dynalite) during development; CI runs them against DynamoDB Local 3.3.1.
+- Not done: Phase 0 (owner), every live AWS step, Phase 3 (Lambda, cut as planned), Phase 4 evidence.
+- Changes from the plan below: (1) notes use `sk=N#<created_at>#<id>` so a reverse Query returns newest
+  first; (2) the IAM policy in `docs/aws-iam-policy.json` uses `bedrock:InvokeModel` and
+  `bedrock:InvokeModelWithResponseStream` (Strands calls ConverseStream; there is no separate Converse
+  action), and drops `BatchWriteItem`, which the code does not use; (3) the agent caps each request at 4
+  model calls; (4) DynamoDB Local is only needed for `npm run test:dynamodb`, not for `npm test`.
+
+Original status: PLAN ONLY. Written 2026-10-22 14:30 IST. No AWS account exists for this project, no AWS call has
 been made, and no credential is stored anywhere in the repository. Nothing in this plan is executed until the
 owner passes the gates in section 2.
 
