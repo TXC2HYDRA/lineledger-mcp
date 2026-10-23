@@ -31,6 +31,8 @@ build/
 .vite/
 .vitest/
 coverage/
+test-results/
+playwright-report/
 *.tsbuildinfo
 
 # local recordings and temporary exports

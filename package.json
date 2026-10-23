@@ -16,6 +16,7 @@
     "dynamodb:seed": "tsx scripts/dynamodb.ts seed",
     "test": "vitest run",
     "test:dynamodb": "LINELEDGER_TEST_DYNAMODB_ENDPOINT=${LINELEDGER_TEST_DYNAMODB_ENDPOINT:-http://127.0.0.1:8000} vitest run",
+    "test:e2e": "playwright test",
     "dev:web": "vite",
     "build": "vite build",
     "check:contrast": "tsx scripts/check-contrast.ts",
@@ -31,6 +32,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.0",
     "@types/express": "5.0.6",
     "@types/node": "22.20.5",
     "tsx": "4.23.15",

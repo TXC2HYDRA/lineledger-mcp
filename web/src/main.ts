@@ -738,8 +738,12 @@ void (async () => {
     const health = (await fetch('/api/health').then((r) => r.json()).catch(() => ({}))) as { store?: string; simulation?: boolean }
     const store = health.store === 'dynamodb' ? ' · store: Amazon DynamoDB' : health.store === 'sqlite' ? ' · store: SQLite' : ''
     const connText = () => `MCP connected · protocol ${mcp.protocolVersion} · ${mcp.sessionId ? `session ${mcp.sessionId.slice(0, 8)}` : 'stateless'}${store}`
-    setConn('connected', connText())
-    mcp.onReconnect = () => setConn('connected', connText())
+    const showSession = () => {
+      setConn('connected', connText())
+      $('conn').dataset.session = mcp.sessionId ?? ''
+    }
+    showSession()
+    mcp.onReconnect = showSession
     addEventListener('pagehide', () => mcp.close())
     addMessage('LineLedger', 'Ready. All data is synthetic demo data, and the two lines are a live simulation. Ask for line status, shift output, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()

@@ -58,3 +58,26 @@ jobs:
       - run: npm test
         env:
           LINELEDGER_TEST_DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+        env:
+          LINELEDGER_TEST_DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+
+  # A real browser against the real server, the web client and the running simulation (SQLite in memory).
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
