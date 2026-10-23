@@ -2,6 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { planContainerLoad } from 'container-load-planner'
 import * as z from 'zod/v4'
+import { noNotifier, type Notifier } from './notify.js'
+import { lineStatus, percentOf, stockStatus } from './rules.js'
 import type { Store } from './store.js'
 
 const ok = (data: Record<string, unknown>): CallToolResult => ({
@@ -32,7 +34,7 @@ const followUpShape = {
   closed_at: z.string().nullable(),
 }
 
-export function registerTools(server: McpServer, store: Store): void {
+export function registerTools(server: McpServer, store: Store, notifier: Notifier = noNotifier): void {
   server.registerTool(
     'get_shift_summary',
     {
@@ -67,7 +69,7 @@ export function registerTools(server: McpServer, store: Store): void {
       if (!found) return fail('No shift data for that date and shift.')
       const latest = { shift_date: found.shift_date, shift: found.shift }
       const rows = await store.shiftLines(latest.shift_date, latest.shift)
-      const pct = (produced: number, target: number) => Math.round((produced / target) * 1000) / 10
+      const pct = percentOf
       const lines = rows.map((r) => {
         const percent = pct(r.produced_units, r.target_units)
         return {
@@ -78,7 +80,7 @@ export function registerTools(server: McpServer, store: Store): void {
           produced_units: r.produced_units,
           percent_of_target: percent,
           downtime_min: r.downtime_min,
-          status: percent >= 95 ? ('on_track' as const) : percent >= 80 ? ('at_risk' as const) : ('behind' as const),
+          status: lineStatus(percent),
         }
       })
       const target = lines.reduce((sum, l) => sum + l.target_units, 0)
@@ -179,6 +181,10 @@ export function registerTools(server: McpServer, store: Store): void {
     async ({ title, owner, line_id, due_date }) => {
       if (line_id && !(await store.lineExists(line_id))) return fail(`Unknown line "${line_id}".`)
       const followUp = await store.addFollowUp({ title, owner, line_id: line_id ?? null, due_date: due_date ?? null, created_at: new Date().toISOString() })
+      await notifier.publish({
+        subject: `New follow-up #${followUp.id}: ${followUp.title}`,
+        message: `${followUp.title}\nOwner: ${followUp.owner}\nLine: ${followUp.line_id ?? 'none'}\nDue: ${followUp.due_date ?? 'none'}`,
+      })
       return ok({ ...followUp })
     },
   )
@@ -246,7 +252,7 @@ export function registerTools(server: McpServer, store: Store): void {
       const rows = await store.findStock(query)
       const items = rows.map((r) => {
         const onHand = r.on_hand
-        const status = onHand === 0 ? ('out_of_stock' as const) : onHand <= r.reorder_point ? ('reorder' as const) : ('ok' as const)
+        const status = stockStatus(onHand, r.reorder_point)
         return {
           sku: r.sku,
           name: r.name,

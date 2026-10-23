@@ -1,7 +1,7 @@
 {
   "name": "lineledger-mcp",
   "version": "0.0.0",
-  "description": "LineLedger \u2014 Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
+  "description": "LineLedger — Factory-Floor Co-pilot: a voice-first assistant backed by a self-hosted MCP server (synthetic demo data).",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1155.0",
+    "@aws-sdk/client-sns": "3.1155.0",
     "@aws-sdk/lib-dynamodb": "3.1155.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "container-load-planner": "git+https://github.com/TXC2HYDRA/container-load-planner.git#3c4fe91",
@@ -33,6 +34,7 @@
   "devDependencies": {
     "@types/express": "5.0.6",
     "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "vite": "8.3.5",

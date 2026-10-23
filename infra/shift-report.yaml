@@ -1,0 +1,73 @@
+# Scheduled shift report: EventBridge rule -> Lambda -> SNS topic. Deployed by scripts/deploy-report.sh.
+# The function role may only read the one DynamoDB table and publish to the one topic.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: LineLedger scheduled shift report (EventBridge, Lambda, SNS)
+Parameters:
+  TableName: { Type: String, Default: lineledger }
+  AlertEmail: { Type: String, Description: Address that receives the alerts and the shift report }
+  CodeBucket: { Type: String }
+  CodeKey: { Type: String }
+  Schedule:
+    Type: String
+    Default: cron(0 6,14,22 * * ? *)
+    Description: EventBridge cron, UTC. Default is the end of three 8-hour shifts.
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: lineledger-alerts
+      Subscription:
+        - { Protocol: email, Endpoint: !Ref AlertEmail }
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: lineledger-report
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:Query]
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref Topic
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lineledger-shift-report
+      Runtime: nodejs22.x
+      Handler: shift-report.handler
+      Role: !GetAtt FunctionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      Environment:
+        Variables:
+          LINELEDGER_DYNAMODB_TABLE: !Ref TableName
+          LINELEDGER_SNS_TOPIC_ARN: !Ref Topic
+  Rule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: lineledger-shift-report
+      ScheduleExpression: !Ref Schedule
+      State: ENABLED
+      Targets:
+        - { Id: shift-report, Arn: !GetAtt Function.Arn }
+  RulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt Rule.Arn
+Outputs:
+  TopicArn:
+    Value: !Ref Topic
+    Description: Set LINELEDGER_SNS_TOPIC_ARN to this for the server's follow-up alerts

@@ -3,12 +3,14 @@ import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middlewar
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import { noNotifier, type Notifier } from './notify.js'
 import type { Store } from './store.js'
 import { registerTools } from './tools.js'
 import { TraceTap } from './trace.js'
 
 export interface AppOptions {
   store: Store
+  notifier?: Notifier
   trace?: TraceTap
   /** Browser origins allowed to call the server. Requests without an Origin header (non-browser clients) pass. */
   allowedOrigins: string[]
@@ -17,7 +19,7 @@ export interface AppOptions {
 const rpcError = (res: Response, status: number, code: number, message: string) =>
   res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null })
 
-export function createApp({ store, trace = new TraceTap(), allowedOrigins }: AppOptions) {
+export function createApp({ store, notifier = noNotifier, trace = new TraceTap(), allowedOrigins }: AppOptions) {
   const app = express()
   app.disable('x-powered-by')
 
@@ -36,7 +38,7 @@ export function createApp({ store, trace = new TraceTap(), allowedOrigins }: App
   app.post('/mcp', async (req: Request, res: Response) => {
     // Stateless (decision D2): a new server and transport per request, state lives in the store.
     const server = new McpServer({ name: 'lineledger', version: '0.1.0' })
-    registerTools(server, store)
+    registerTools(server, store, notifier)
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
 
     const inbound: unknown = req.body
