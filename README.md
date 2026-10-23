@@ -153,15 +153,198 @@ After a server restart the old session id gets a 404; the browser client opens a
 
 ## Architecture
 
+### System overview
+
+Everything runs on one machine, on loopback. The browser and the optional agent are both MCP clients of
+the same server. Solid boxes run by default; dashed boxes are optional switches.
+
+```mermaid
+flowchart LR
+  subgraph Browser["Browser: web/ (Vite + TypeScript)"]
+    Voice["Voice: Web Speech API"]
+    Planner["Planner: rules, or agent model"]
+    Client["MCP client (SDK)"]
+    UI["Dashboard, chat, forms, trace drawer"]
+    Voice --> Planner --> Client
+    Client --> UI
+  end
+
+  subgraph Server["MCP server: server/ (Node 22, Express 5)"]
+    Endpoint["/mcp Streamable HTTP<br/>POST, GET push, DELETE"]
+    Tools["12 tools + resource plant://snapshot<br/>(zod schemas)"]
+    Sim["FactorySim<br/>sim.ts + plant/plant.json"]
+    Trace["Trace tap<br/>/api/trace"]
+    StoreIf["Store interface"]
+    Endpoint --> Tools
+    Tools --> Sim
+    Tools --> StoreIf
+    Sim --> StoreIf
+    Endpoint -.-> Trace
+  end
+
+  Sqlite[("SQLite<br/>default")]
+  Dynamo[("Amazon DynamoDB<br/>optional")]
+  Planner3["container-load-planner<br/>(open source, MIT)"]
+  Notify["SNS / local alerts<br/>optional"]
+
+  subgraph Agent["Agent: agent/ (Python, Strands)"]
+    Guards["Guards + progress"]
+    Model["Ollama qwen3:4b-instruct<br/>local, CPU"]
+    Bedrock["Amazon Nova on Bedrock<br/>optional"]
+    Guards --> Model
+    Guards -.-> Bedrock
+  end
+
+  Client <-->|"MCP 2025-11-25"| Endpoint
+  StoreIf --> Sqlite
+  StoreIf -.-> Dynamo
+  Tools --> Planner3
+  Tools -.-> Notify
+  Planner -->|"/agent/chat"| Guards
+  Guards -->|"MCP client"| Endpoint
+
+  Alexa["Alexa+ (not built)<br/>would be another MCP client"]
+  Alexa -.-> Endpoint
+
+  classDef optional stroke-dasharray: 5 4;
+  class Dynamo,Notify,Bedrock,Alexa optional;
 ```
-browser (web/)  <--stateful MCP session-->  MCP server (server/)  -->  store: SQLite (default)
-   chat, trace, live dashboard   (POST, GET push, DELETE)   Express + MCP SDK      or Amazon DynamoDB (LINELEDGER_STORE=dynamodb)
-                                                            plant simulation       container-load-planner
-                                                            (sim.ts, plant.json)
-        |                                    ^
-        +--- optional: /agent proxy ---> agent/ (Strands) --MCP client--+
-                                           model: local Ollama (default)
-                                              or Amazon Nova on Bedrock (LINELEDGER_MODEL_PROVIDER=bedrock)
+
+### How a request travels
+
+A spoken or typed request becomes one MCP tool call. Reads come from the live simulation or the store;
+writes go to the store. Every message in both directions is recorded by the trace tap.
+
+```mermaid
+sequenceDiagram
+  actor Op as Operator
+  participant Web as Browser page
+  participant Srv as MCP server
+  participant Sim as Plant simulation
+  participant DB as Store
+
+  Note over Web,Srv: Session set up once: initialize, tools/list, resources/subscribe
+  Op->>Web: click Listen, say "why is line 2 down"
+  Web->>Web: speech to text, rules planner picks the tool
+  Web->>Srv: tools/call get_live_line_status {line_id: "L2"}
+  Srv->>Sim: read live state
+  Sim-->>Srv: state, reason, minutes, sensors, alarms
+  Srv-->>Web: structuredContent + text
+  Web-->>Op: short sentence, spoken aloud
+
+  Op->>Web: "add handover note for line 2: ..."
+  Web->>Srv: tools/call create_handover_note
+  Srv->>DB: insert note
+  DB-->>Srv: saved row
+  Srv-->>Web: result
+  Srv-->>Web: data_changed notice to other sessions
+```
+
+### Live updates (server push)
+
+The page subscribes once to `plant://snapshot`. After that the server announces changes and the page
+reads again; the page does not poll.
+
+```mermaid
+sequenceDiagram
+  participant Sim as Simulation tick
+  participant Srv as MCP server
+  participant Web as Browser (GET event stream)
+
+  Web->>Srv: resources/subscribe plant://snapshot
+  loop while the plant changes (at most once a second)
+    Sim->>Srv: state changed
+    Srv-->>Web: notifications/resources/updated
+    Web->>Srv: resources/read plant://snapshot
+    Srv-->>Web: whole plant as JSON
+    Web->>Web: redraw line cards, clock, alarms
+  end
+```
+
+### Optional agent path
+
+With "Planner: agent model" selected, a local language model chooses the tools instead of the rules. If the
+agent service fails, the page says so and answers the same request with the rules.
+
+```mermaid
+sequenceDiagram
+  participant Web as Browser
+  participant Ag as Agent service :8788
+  participant LLM as Ollama :11434
+  participant Srv as MCP server :8787
+
+  Web->>Ag: POST /chat (request text)
+  Web->>Ag: GET /progress (about every 0.7 s)
+  Ag->>LLM: prompt + tool descriptions
+  LLM-->>Ag: call get_live_line_status
+  Ag->>Srv: tools/call (MCP client inside the agent)
+  Srv-->>Ag: result
+  Ag->>LLM: result
+  LLM-->>Ag: final answer
+  Ag-->>Web: reply text
+```
+
+### Production line states
+
+Each of the seven simulated lines is in one of these states each simulated minute.
+
+```mermaid
+stateDiagram-v2
+  [*] --> OFF_SHIFT
+  OFF_SHIFT --> RUN: shift starts with a crew
+  RUN --> STOP_FAULT: equipment trip
+  RUN --> STOP_OTHER: jam, changeover, no operator
+  RUN --> PLANNED_STOP: planned break
+  RUN --> IDLE_STARVED: material runs out
+  STOP_FAULT --> RUN: repaired
+  STOP_OTHER --> RUN: cleared
+  PLANNED_STOP --> RUN: break ends
+  IDLE_STARVED --> RUN: goods receipt booked
+  RUN --> OFF_SHIFT: shift ends
+```
+
+### Story day
+
+The demo story starts at 12:55 on a fresh plant database. With `LINELEDGER_SIM_HOLDS=on` the clock pauses
+for 12 seconds at 12:58, 13:15 and 13:23 so a presenter can speak.
+
+```mermaid
+timeline
+  title Line 2 sealer overheat (plant time, 13h05 = 13:05)
+  12h55 : Story starts, shift A already simulated from 06h00
+  13h05 : Sealer jaw temperature starts to climb, rejects rise
+  13h14 : Warning alarm M3-TEMP-HI
+  13h15 : Hourly seal peel test fails
+  13h23 : Trip alarm M3-HEAT-OVR, Line 2 stops
+  13h28 : Maintenance starts the repair
+  13h58 : Heater band swapped, stock down by one
+  14h02 : Line 2 restarts
+  14h10 : Time-lapse x300 until 16h15
+```
+
+### Alexa+ mapping (not built)
+
+Amazon's Alexa+ MCP documentation describes Alexa+ as the MCP client and the developer's server as a remote
+HTTPS endpoint, registered through an add-on. This repository does not include the add-on, OAuth account
+linking or public hosting, and nothing was tested against Alexa+. The sketch shows where each part would sit.
+
+```mermaid
+flowchart LR
+  subgraph Today["Today: simulated voice experience"]
+    A1["Browser mic and speaker<br/>(Web Speech API)"]
+    A2["Rules planner or local model"]
+    A3["MCP client in the page"]
+    A1 --> A2 --> A3
+  end
+  subgraph Real["Real Alexa+ (not built)"]
+    B1["Echo device"]
+    B2["Alexa+ reasoning"]
+    B3["Alexa+ MCP client via add-on"]
+    B1 --> B2 --> B3
+  end
+  Server["LineLedger MCP server<br/>same tools and resource"]
+  A3 --> Server
+  B3 -.->|"needs HTTPS URL + OAuth 2.1 PKCE"| Server
 ```
 
 - `server/`: TypeScript MCP server (Express 5, zod 4) with the Tarnby Works simulation (`sim.ts`, seeded,
