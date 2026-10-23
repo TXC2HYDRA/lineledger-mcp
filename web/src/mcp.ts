@@ -25,27 +25,52 @@ export class McpConnection {
   sessionId: string | undefined
   /** Called after a lost session was replaced by a new one. */
   onReconnect: (() => void) | undefined
+  /** When the page last heard from the server: a reply or a push. */
+  lastHeard = Date.now()
+  private connected = false
 
   async connect(): Promise<void> {
+    this.connected = false
     this.client = new Client({ name: 'lineledger-web', version: '0.2.0' })
-    this.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => this.watchers.get(n.params.uri)?.())
+    this.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (n) => {
+      this.lastHeard = Date.now()
+      this.watchers.get(n.params.uri)?.()
+    })
     this.transport = new StreamableHTTPClientTransport(new URL('/mcp', location.href))
     await this.client.connect(this.transport)
     this.protocolVersion = this.transport.protocolVersion
     this.sessionId = this.transport.sessionId
     for (const uri of this.watchers.keys()) await this.client.subscribeResource({ uri })
+    this.connected = true
+  }
+
+  private async reopen(): Promise<void> {
+    await this.client?.close().catch(() => undefined)
+    await this.connect()
+    this.onReconnect?.()
   }
 
   private async retry<T>(fn: () => Promise<T>): Promise<T> {
+    const run = async () => {
+      const result = await fn()
+      this.lastHeard = Date.now()
+      return result
+    }
+    if (!this.connected) await this.reopen() // an earlier reconnect failed, for example while the server was down
     try {
-      return await fn()
+      return await run()
     } catch (error) {
       if (!sessionGone(error)) throw error
-      await this.client.close().catch(() => undefined)
-      await this.connect()
-      this.onReconnect?.()
-      return fn()
+      await this.reopen()
+      return run()
     }
+  }
+
+  /** Liveness check. After a server restart the old session id gets a 404, so this opens a new session. */
+  async ping(): Promise<void> {
+    await this.retry(async () => {
+      await this.client.ping()
+    })
   }
 
   async call(name: string, args: Record<string, unknown>): Promise<ToolResult> {

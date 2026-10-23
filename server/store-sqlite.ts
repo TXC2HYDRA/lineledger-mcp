@@ -7,8 +7,8 @@ export class SqliteStore implements Store {
 
   constructor(readonly db: Db) {}
 
-  static open(path = ':memory:'): SqliteStore {
-    return new SqliteStore(openDb(path))
+  static open(path = ':memory:', options: { seed?: boolean } = {}): SqliteStore {
+    return new SqliteStore(openDb(path, options))
   }
 
   async lineExists(id: string): Promise<boolean> {

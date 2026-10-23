@@ -196,6 +196,10 @@ Built from the handoff `docs/simulation_context.md`, reshaped to the time left (
 - D-INPROCESS (instead of D-TRANSPORT): the simulation runs inside the server and writes to the store; the
   handoff's separate simulator with a WebSocket telemetry channel and signed webhooks was not built. The
   integration boundary for a real gateway would be an ingest endpoint; that is future work.
+- D-NOSEED: the plant profile (`LINELEDGER_PLANT=1`) opens its store without the two-line demo rows (notes,
+  follow-ups, hand-written shift trend). A fresh plant store gets seven simulated days of shift history
+  (`FactorySim.history`) before the story day. Night-shift (C) targets for Lines 2 and 4 were raised to the day
+  targets (800 and 940), because the simulated history showed them at 110 to 155 percent.
 - D-STATEFUL: shipped (D2b), so the dashboard is pushed `plant://snapshot` updates instead of polling.
 - Determinism: one simulated minute per step whatever the real tick size; per-line random substreams;
   seed 1 meets the story checks (`npm run plant:story-check`).

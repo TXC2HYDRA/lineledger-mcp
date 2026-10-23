@@ -59,6 +59,12 @@ The web page shows the chat, a live MCP trace of the real JSON-RPC traffic (incl
 seven live line cards, a simulated-clock chip and an alarm ticker. Without the plant profile the server
 keeps the small two-line seed and no simulation, as the tests use it.
 
+The plant profile has no hand-written demo rows. On a fresh plant database the server first simulates the
+seven days before the story day (about 0.1 s, its own random streams, stock back at the starting levels
+afterwards), so the shift history and the trend hold simulated shifts for all seven lines; notes and
+follow-ups start empty. A plant database made before this change (`data/plant.sqlite`) keeps its old seed
+rows until `npm run plant:reset`.
+
 ## Run it
 
 Requirements: Node 22.12 or newer. No cloud account and no API key.

@@ -214,15 +214,7 @@ export class FactorySim {
    * then the clock goes live. Otherwise the simulation continues with the shift after the latest on record.
    */
   static async create(store: Store, options: SimOptions = {}): Promise<FactorySim> {
-    const sim = new FactorySim(store, options.seed ?? PLANT.story.seed, options)
-    for (const item of PLANT.stock) {
-      const row = (await store.findStock(item.sku)).find((r) => r.sku === item.sku)
-      if (!row) throw new Error(`the plant simulation needs stock item ${item.sku}; run with LINELEDGER_PLANT=1`)
-      sim.stock.set(item.sku, { onHand: row.on_hand, dirty: false, log: [], used: 0 })
-    }
-    for (const line of PLANT.lines) {
-      if (!(await store.lineExists(line.id))) throw new Error(`the plant simulation needs line ${line.id}; run with LINELEDGER_PLANT=1`)
-    }
+    const sim = await FactorySim.load(store, options.seed ?? PLANT.story.seed, options)
     const latest = await store.latestShift({})
     const storyDay = Date.parse(`${PLANT.story.date}T00:00:00.000Z`)
     const latestDay = latest ? Date.parse(`${latest.shift_date}T00:00:00.000Z`) : storyDay - DAY
@@ -243,6 +235,37 @@ export class FactorySim {
       await sim.flush(true)
     }
     return sim
+  }
+
+  private static async load(store: Store, seed: number, options: SimOptions): Promise<FactorySim> {
+    const sim = new FactorySim(store, seed, options)
+    for (const item of PLANT.stock) {
+      const row = (await store.findStock(item.sku)).find((r) => r.sku === item.sku)
+      if (!row) throw new Error(`the plant simulation needs stock item ${item.sku}; run with LINELEDGER_PLANT=1`)
+      sim.stock.set(item.sku, { onHand: row.on_hand, dirty: false, log: [], used: 0 })
+    }
+    for (const line of PLANT.lines) {
+      if (!(await store.lineExists(line.id))) throw new Error(`the plant simulation needs line ${line.id}; run with LINELEDGER_PLANT=1`)
+    }
+    return sim
+  }
+
+  /**
+   * For a fresh plant store: simulates the `days` whole days before the story day, headless and with its own
+   * random streams, and writes only their shift results, so the shift history and the trend hold simulated
+   * shifts instead of hand-written ones. Stock goes back to the plant's starting levels afterwards, and the
+   * last shift stays one minute short of its end, so the story day still runs on this store.
+   */
+  static async history(store: Store, days = 7): Promise<void> {
+    const sim = await FactorySim.load(store, PLANT.story.seed + 1, { story: false })
+    for (const item of sim.stock.values()) item.onHand = 1e12 // a week of goods receipts is not modelled: no line starves
+    const storyDay = Date.parse(`${PLANT.story.date}T00:00:00.000Z`)
+    const end = storyDay + PLANT.shifts.A.start_min * MINUTE
+    sim.beginShift(end - days * DAY, 'A')
+    sim.lastLog = sim.t
+    await sim.run(days * DAY - MINUTE, false)
+    await sim.flush(true)
+    for (const item of PLANT.stock) await store.putStockItem(item)
   }
 
   // ---- reading ----------------------------------------------------------------------------------

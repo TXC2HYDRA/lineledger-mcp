@@ -101,5 +101,6 @@ export async function openStore(env: NodeJS.ProcessEnv = process.env): Promise<S
     return openDynamoDbStore(env)
   }
   const { SqliteStore } = await import('./store-sqlite.js')
-  return SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite')
+  // The plant profile keeps no hand-written demo rows: its shifts, stock and trend come from the simulation.
+  return SqliteStore.open(env.LINELEDGER_DB ?? 'data/lineledger.sqlite', { seed: env.LINELEDGER_PLANT !== '1' })
 }

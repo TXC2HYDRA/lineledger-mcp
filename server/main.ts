@@ -21,7 +21,7 @@ const store = await openStore(process.env)
 
 let sim: FactorySim | undefined
 if (plant) {
-  await applyPlantSeed(store)
+  if (await applyPlantSeed(store)) await FactorySim.history(store) // a fresh plant store: a week of simulated shifts first
   // LINELEDGER_SIM_SPEED: simulated seconds per real second (default 120: one simulated hour in 30 seconds).
   const speed = Number(process.env.LINELEDGER_SIM_SPEED ?? 120)
   if (!Number.isFinite(speed) || speed <= 0 || speed > 3600) throw new Error('LINELEDGER_SIM_SPEED must be a number from 0 to 3600')

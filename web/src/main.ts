@@ -752,12 +752,35 @@ void (async () => {
       $('conn').dataset.session = mcp.sessionId ?? ''
     }
     showSession()
-    mcp.onReconnect = showSession
+    mcp.onReconnect = () => {
+      showSession()
+      void refreshAll()
+      void refreshLive()
+    }
     addEventListener('pagehide', () => mcp.close())
     addMessage('LineLedger', 'Ready. All data is synthetic demo data. Ask how the lines are doing right now, why a line is down, for the shift summary, handover notes, follow-ups, stock or container loads.')
     await mcp.listTools()
     await refreshAll()
     await startLive(health.simulation !== false)
+    // A server restart ends the session and stops the pushes. Nothing heard for 10 s: ping, which opens a new
+    // session on a 404 (see mcp.ts), and say so on the page meanwhile instead of showing stale data as live.
+    let lost = false
+    setInterval(async () => {
+      if (Date.now() - mcp.lastHeard < 10_000) return
+      try {
+        await mcp.ping()
+        if (lost) {
+          lost = false
+          showSession()
+          void refreshLive()
+        }
+      } catch {
+        if (!lost) {
+          lost = true
+          setConn('connecting', 'MCP connection lost, reconnecting…')
+        }
+      }
+    }, 5000)
   } catch (e) {
     setConn('error', 'MCP not reachable')
     setVoice('error', `Cannot reach the MCP server: ${errorText(e)}`)

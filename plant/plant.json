@@ -38,7 +38,7 @@
         { "id": "M3", "name": "Liner insert and heat sealer", "cycle_s": 24 },
         { "id": "M4", "name": "Palletise", "cycle_s": 18 }
       ],
-      "ideal_cycle_s": 26, "target": { "A": 800, "B": 800, "C": 500 },
+      "ideal_cycle_s": 26, "target": { "A": 800, "B": 800, "C": 800 },
       "mtbf_min": 80, "mttr_median_min": 9, "slowdown": 1.08, "warmup": [1.5, 15], "micro_stops_per_h": 3, "reject_rate": 0.024,
       "reject_codes": { "SHORT_SHOT": 40, "FLASH": 35, "SEAL_WEAK": 25 },
       "downtime_reasons": { "MOLD_TEMP_TRIP": 35, "UNCLASSIFIED": 33, "QUALITY_HOLD": 19, "NO_OPERATOR": 13 },
@@ -68,7 +68,7 @@
         { "id": "M2", "name": "Degate and cool", "cycle_s": 16 },
         { "id": "M3", "name": "Stack", "cycle_s": 12 }
       ],
-      "ideal_cycle_s": 22, "target": { "A": 940, "B": 940, "C": 600 },
+      "ideal_cycle_s": 22, "target": { "A": 940, "B": 940, "C": 940 },
       "mtbf_min": 85, "mttr_median_min": 9, "slowdown": 1.08, "warmup": [1.5, 15], "micro_stops_per_h": 3, "reject_rate": 0.020,
       "reject_codes": { "SHORT_SHOT": 45, "WARP": 30, "FLASH": 25 },
       "downtime_reasons": { "MOLD_TEMP_TRIP": 35, "UNCLASSIFIED": 30, "QUALITY_HOLD": 20, "NO_OPERATOR": 15 },

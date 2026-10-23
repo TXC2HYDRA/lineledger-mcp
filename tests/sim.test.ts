@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { applyPlantSeed, PLANNED_MIN, PLANT } from '../server/plant.js'
 import { FactorySim, plannedElapsed } from '../server/sim.js'
+import { SqliteStore } from '../server/store-sqlite.js'
 import type { Store } from '../server/store.js'
 import { HARNESSES } from './harness.js'
 
@@ -115,7 +116,7 @@ describe.each(HARNESSES)('$name store: Tarnby Works simulation', (h) => {
     await sim.advance(8 * HOUR)
     expect(sim.snapshot().shift).toMatchObject({ date: '2026-10-22', shift: 'A' })
     const c = await store.shiftLines('2026-10-21', 'C')
-    expect(c.map((r) => [r.line_id, r.target_units])).toEqual([['L2', 500], ['L4', 600]])
+    expect(c.map((r) => [r.line_id, r.target_units])).toEqual([['L2', 800], ['L4', 940]])
     expect(c[0]!.produced_units).toBeGreaterThan(400)
     expect(sim.snapshot().lines.every((l) => l.state !== 'OFF_SHIFT')).toBe(true)
   })
@@ -133,5 +134,30 @@ describe.each(HARNESSES)('$name store: Tarnby Works simulation', (h) => {
     const a = await run(7)
     expect(await run(7)).toEqual(a)
     expect((await run(8)).events).not.toEqual(a.events)
+  })
+})
+
+describe('plant profile on an empty store (no hand-written demo rows)', () => {
+  it('holds a week of simulated shifts, no seed notes or follow-ups, the starting stock, and still runs the story day', async () => {
+    const store = SqliteStore.open(':memory:', { seed: false })
+    expect(await store.listNotes({ limit: 10 })).toEqual([])
+    expect(await store.listFollowUps({ status: 'all' })).toEqual([])
+    expect(await applyPlantSeed(store)).toBe(true)
+    await FactorySim.history(store)
+
+    const shifts = await store.recentShifts(500)
+    const dates = [...new Set(shifts.map((r) => r.shift_date))]
+    expect(dates).toEqual(['2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21'])
+    expect(new Set(shifts.map((r) => r.line_id)).size).toBe(7) // every line has history, not just L1 and L2
+    for (const r of shifts) {
+      expect(r.produced_units).toBeGreaterThan(0.5 * r.target_units) // nothing starves: a week of receipts is not modelled
+      expect(r.produced_units).toBeLessThan(1.25 * r.target_units)
+    }
+    expect(await store.latestShift({})).toEqual({ shift_date: '2026-10-21', shift: 'C' })
+    expect(await onHand(store, 'PLY-HDPE')).toBe(20400) // history does not eat the story's stock
+
+    const sim = await FactorySim.create(store)
+    expect(sim.snapshot().sim_clock.sim_now).toBe('2026-10-22 12:55')
+    expect(await store.latestShift({})).toEqual({ shift_date: '2026-10-22', shift: 'A' })
   })
 })
