@@ -12,7 +12,10 @@
     "preflight:mcp": "tsx scripts/mcp-preflight.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web",
     "dev:server": "tsx server/main.ts",
+    "dynamodb:local-table": "tsx scripts/dynamodb.ts create-local",
+    "dynamodb:seed": "tsx scripts/dynamodb.ts seed",
     "test": "vitest run",
+    "test:dynamodb": "LINELEDGER_TEST_DYNAMODB_ENDPOINT=${LINELEDGER_TEST_DYNAMODB_ENDPOINT:-http://127.0.0.1:8000} vitest run",
     "dev:web": "vite",
     "build": "vite build",
     "check:contrast": "tsx scripts/check-contrast.ts",
@@ -20,6 +23,8 @@
     "test:agent": ".venv/bin/python -m unittest discover -s agent -v"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1155.0",
+    "@aws-sdk/lib-dynamodb": "3.1155.0",
     "@modelcontextprotocol/sdk": "1.32.1",
     "container-load-planner": "git+https://github.com/TXC2HYDRA/container-load-planner.git#3c4fe91",
     "express": "5.3.0",
